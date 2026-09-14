@@ -44,6 +44,7 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
       statusColor: "#2EC272",
       since: "2026-09-01 10:00:00",
       retries: 0,
+      adapterName: "",
       memory: "120MB",
       uptime: "02:00:00"
     },
@@ -214,18 +215,26 @@ describe("toBotCards", () => {
     expect(toBotCards(state)[0]?.countContacts).toEqual({ 好友: "12", 群: "3" })
   })
 
-  it("适配器名用 ` / ` 连接", () => {
+  it("**`platform` 只放该账号用的那一个适配器**，不把注册了的全列出来", () => {
+    /*
+     * 这一条盯的是一个真实出现过的现象：账号上写着「NapCat (OneBot v11) / 标准输入」，
+     * 而那个账号用的只是标准输入。原因是这里曾取 `view.adapters`（`adapters.list()` 的
+     * 全体，那是给面板「添加账号」页选类型用的）拼起来 —— 与账号无关，装了几个适配器
+     * 插件就显示几个名字。故夹具里同时给两个适配器，断言只出账号名下的那个。
+     */
     const state = makeState({
+      bot: { ...makeState().bot, adapterName: "标准输入" },
       adapters: [
-        { name: "napcat", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" },
-        { name: "stdin", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" }
+        { name: "NapCat (OneBot v11)", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" },
+        { name: "标准输入", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" }
       ]
     })
-    expect(toBotCards(state)[0]?.platform).toBe("napcat / stdin")
+    expect(toBotCards(state)[0]?.platform).toBe("标准输入")
   })
 
-  it("没有适配器时 `platform` 是空串，模板里那一行就不显示", () => {
-    expect(toBotCards(makeState())[0]?.platform).toBe("")
+  it("适配器取不到时整项不放 —— 模板里 `{{if $value.platform}}` 会跳过那一行", () => {
+    // 放空串的话模板会画出一个带图标的空标签，比不画更难看
+    expect("platform" in toBotCards(makeState())[0]!).toBe(false)
   })
 
   it("版本号带 `v` 前缀", () => {

@@ -251,6 +251,7 @@ export default definePlugin({
                 retries: account.retries
               })),
               selfId,
+              adapterId: picked.account.record.adapterId,
               nickname: picked.account.nickname ?? picked.bot?.nickname ?? "",
               status: picked.account.status,
               since: picked.account.since,

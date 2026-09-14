@@ -27,6 +27,15 @@ export interface BotView {
   readonly nickname: string
   /** 账号号码 */
   readonly uin: string
+  /**
+   * 该账号所用适配器的名字
+   *
+   * **是该账号的那一个，不是"注册了哪几个"。** 曾经这里是 `adapters.list()` 里全部
+   * 适配器名拼起来的 —— 而那份列表是给面板「添加账号」页选类型用的，与账号无关。
+   * 装了 NapCat 与标准输入两个适配器插件时，用标准输入的账号上会并排显示两个名字。
+   * 取不到（适配器已卸载）时为空串，模板据此不画这个标签。
+   */
+  readonly adapterName: string
   /** 头像的 `data:` URL，或本地默认头像的 `file://` 地址 */
   readonly avatar: string
   /** 在线状态文案，已翻译成中文 */
@@ -223,6 +232,7 @@ export async function collectBot(
   return {
     nickname: input.nickname === "" ? "未知" : input.nickname,
     uin: input.selfId,
+    adapterName: input.adapterName,
     avatar,
     status: status.text,
     // 原文原样带上，认不出的词也给 —— 取图标时再退到中性图标

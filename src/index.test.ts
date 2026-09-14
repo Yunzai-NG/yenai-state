@@ -52,6 +52,7 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
     bot: {
       nickname: "测试号",
       uin: "10001",
+      adapterName: "",
       avatar: "",
       status: "在线",
       statusKey: "online",

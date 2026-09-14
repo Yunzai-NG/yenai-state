@@ -115,6 +115,8 @@ export interface BuildInput {
   }[]
   /** 被选中的账号的 selfId */
   readonly selfId: string
+  /** 被选中账号所属的适配器 id，用于查出它叫什么 */
+  readonly adapterId: string
   /** 被选中账号的昵称 */
   readonly nickname: string
   /** 被选中账号的状态 */
@@ -282,7 +284,8 @@ export async function buildState(input: BuildInput): Promise<StateView> {
         ...(input.groupCount === undefined ? {} : { groupCount: input.groupCount }),
         adapterAccounts: input.accounts.length,
         adapterOnline: input.accounts.filter(account => account.status === "online").length,
-        adapterName: ""
+        // 该账号实际用的那个适配器 —— 不是 `input.adapters` 全体（那是"注册了哪几个"）
+        adapterName: input.adapters.find(adapter => adapter.id === input.adapterId)?.name ?? ""
       },
       input.http,
       input.defaultAvatar,
@@ -359,6 +362,8 @@ function emptyBot(input: BuildInput): BotView {
   return {
     nickname: input.nickname === "" ? "未知" : input.nickname,
     uin: input.selfId,
+    // 适配器名与账号数据无关，兜底时照常给得出（账号取不到不是适配器没注册）
+    adapterName: input.adapters.find(adapter => adapter.id === input.adapterId)?.name ?? "",
     avatar: "",
     status: "未知",
     // 原文给空串：`statusIcon` 认不出时会退到最中性的那个图标

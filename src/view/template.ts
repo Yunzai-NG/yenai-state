@@ -159,7 +159,7 @@ export interface BotCard {
   readonly status: string
   /** 框架版本 */
   readonly botVersion: string
-  /** 已加载的适配器名，用 ` / ` 连接 */
+  /** 该账号所用适配器的名字；取不到时不出现 */
   readonly platform?: string
   /** 本进程已运行时长 */
   readonly botRunTime: string
@@ -235,7 +235,8 @@ export function toBotCards(view: StateView): BotCard[] {
       // 按状态原文取图标，不是按中文文案 —— 见 statusIcon 的注释
       status: statusIcon(bot.statusKey),
       botVersion: `v${view.system.version}`,
-      platform: view.adapters.map(adapter => adapter.name).join(" / "),
+      // 该账号实际用的那一个适配器；取不到时整项不放，模板里 `{{if $value.platform}}` 会跳过
+      ...(view.bot.adapterName === "" ? {} : { platform: view.bot.adapterName }),
       botRunTime: bot.uptime,
       countContacts: contacts,
       messageCount: {}
