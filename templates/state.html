@@ -1,0 +1,449 @@
+{{extend defaultLayout}}
+
+{{block 'css'}}
+<link rel="stylesheet" href="{{_res_path}}css/index.css" />
+<style>
+    .container {
+        background-image:url({{style.backdrop}})
+    }
+</style>
+{{/block}}
+
+{{block 'main'}}
+<script>
+    var chartData = JSON.parse(`{{@chartData}}`)
+    var Config = JSON.parse(`{{@Config}}`)
+    var redisChartData = JSON.parse(`{{@redis.connectionData}}`)
+    var _res_path = `{{_res_path}}`
+</script>
+<script src="{{_res_path}}js/modules/echarts.min.js"></script>
+{{each BotStatusList}}
+<div class="box">
+    <div class="botInfo">
+        <div class="avatar-box">
+            <div class="avatar">
+                <img src="{{$value.avatar?.path}}">
+            </div>
+            <div class="onlineStatus">
+                <img src="{{_res_path}}icon/{{$value.status}}.png">
+            </div>
+        </div>
+        <div class="header">
+            <h1>
+                <div class="name">{{$value.nickname}}</div>
+            </h1>
+            <p>
+                <span style="background: #FBE0F3" class="botVersion">
+                    <img src="{{_res_path}}icon/机器人.png">
+                    {{$value.botVersion}}
+                </span>
+                {{if $value.platform}}
+                <span style="background: #F0EDF2" class="platform">
+                    <img src="{{_res_path}}icon/platform.png">
+                    {{$value.platform}}
+                </span>
+                <span style="background: #F1EBFA" class="botrunTime">
+                    <img src="{{_res_path}}icon/时间.png">
+                    Bot已运行 {{$value.botRunTime}}
+                </span>
+                {{/if}}
+            </p>
+            <p>
+                {{each $value.countContacts v i}}
+                {{if v}}
+                <span class="contacts">
+                    <img src="{{_res_path}}icon/{{i}}.png">
+                    {{@v}}
+                </span>
+                {{/if}}
+                {{/each}}
+                {{each $value.messageCount v i}}
+                {{if v}}
+                <span class="contacts">
+                    <img src="{{_res_path}}icon/{{i}}.png">
+                    {{@v}}
+                </span>
+                {{/if}}
+                {{/each}}
+            </p>
+        </div>
+    </div>
+</div>
+{{/each}}
+<div class="box clear-style" data-boxInfo="系统信息">
+    <div>
+        <div class="sysTitle">
+            <img src="{{_res_path}}icon/系统.png" class="icon">
+            系统
+            </img>
+        </div>
+        <div class="sysData">
+            <div class="main">{{otherInfo.osInfo.main}}</div>
+            <div class="secondary">{{otherInfo.osInfo.secondary}}</div>
+        </div>
+    </div>
+    <div>
+        <div class="sysTitle">
+            <img src="{{_res_path}}icon/主机名.png" class="icon">
+            主机名
+            </img>
+        </div>
+        <div class="sysData">
+            <div class="main">{{otherInfo.hostname.main}}</div>
+        </div>
+    </div>
+    <div>
+        <div class="sysTitle">
+            <img src="{{_res_path}}icon/time.png" class="icon">
+            运行时间
+            </img>
+        </div>
+        <div class="sysData">
+            <div class="main">{{otherInfo.sysTime.main}}</div>
+            <div class="secondary">{{time}} {{isPro ? '状态Pro' : ''}}</div>
+        </div>
+    </div>
+    <div>
+        <div class="sysTitle">
+            <img src="{{_res_path}}icon/插件.png" class="icon">
+            插件数
+            </img>
+        </div>
+        <div class="sysData">
+            <div class="main">{{otherInfo.pluginNum.main}}</div>
+            <div class="secondary">{{otherInfo.pluginNum.secondary}}</div>
+        </div>
+    </div>
+</div>
+<div class="box" data-boxInfo="主硬件">
+    <div class="title"><img src="{{_res_path}}icon/资源.png" class="icon">资源使用</div>
+    <ul class="mainHardware">
+        {{each visualData group i}}
+        <li class="li">
+            <div class="container-box" data-num="{{group.inner}}" id="box">
+                <div class="circle-outer"></div>
+                <svg>
+                    <!-- <defs>
+                        <radialGradient id="gradient{{i}}" cx="50%" cy="50%" r="60%" fx="50%" fy="50%">
+                            <stop offset="30%" stop-color="var({{group.color}}-dark)" />
+                            <stop offset="100%" stop-color="var({{group.color}}-light)" />
+                        </radialGradient>
+                    </defs> -->
+                    {{if group.title == "RAM" && group?.buffcache?.isBuff}}
+                    <circle id="circle" stroke="{{group.buffcache?.percentage?.color}}"
+                        style="stroke-dashoffset:{{group.buffcache?.percentage?.per}}"></circle>
+                    {{/if}}
+                    <circle id="circle" stroke="{{group.percentage.color}}"
+                        style="stroke-dashoffset:{{group.percentage.per}}"></circle>
+                </svg>
+            </div>
+            <article>
+                <summary>{{group.title}}</summary>
+                {{if group.detailed}}
+                <div class="detailed">{{group.detailed}}</div>
+                {{/if}}
+                {{each group.info info}}
+                <p>{{info}}</p>
+                {{/each}}
+            </article>
+        </li>
+        {{/each}}
+    </ul>
+</div>
+
+{{if disks.disksSize}}
+<div class="box memory" data-boxInfo="磁盘">
+    <div class="title">
+        <img src="{{_res_path}}icon/磁盘.png" class="icon">
+        磁盘使用
+        </img>
+    </div>
+    <ul>
+        {{each disks.disksSize}}
+        <li class="HardDisk_li">
+            <div class="left">
+                <div class="container-box" data-num="{{$value.use}}%" id="box">
+                    <div class="circle-outer"></div>
+                    <svg>
+                        <circle id="circle" stroke="{{$value.color}}" style="stroke-dashoffset:{{$value.per}}">
+                        </circle>
+                    </svg>
+                </div>
+            </div>
+            <div class="right">
+                <div class="fs">
+                    <div class="name">{{$value.mount}}</div>
+                    <div class="size">{{$value.used}} / {{$value.size}}</div>
+                </div>
+                <div class="progress">
+                    <div class="bar" style="width: {{$value.use}}%;background: {{$value.color}};"></div>
+                </div>
+                <div class="fsInfo">
+                    <div>
+                        <div class="icon" style="background: {{$value.color}};"></div>
+                        已使用 {{$value.used}}
+                    </div>
+                    <div>
+                        <div class="icon" style="background: #8E8691;"></div>
+                        未使用 {{$value.available}}
+                    </div>
+                    <div>文件系统 {{$value.type}} </div>
+                </div>
+            </div>
+        </li>
+        {{/each}}
+    </ul>
+    {{if disks.disksIo}}
+    {{each disks.disksIo}}
+    <div class="speed">
+        <p>{{$value.name}}</p>
+        <p>R {{@$value.rIO_sec}}/s - W {{@$value.wIO_sec}}/s{{if $value.tIO_sec}} - T
+            {{@$value.tIO_sec}}/s{{/if}}
+        </p>
+    </div>
+    {{/each}}
+    {{/if}}
+</div>
+{{/if}}
+
+<script src="{{_res_path}}js/style.js"></script>
+
+
+{{if network.speed || network.psTest}}
+<div class="box" data-boxInfo="网络">
+    {{if network.speed}}
+    <div class="networkInfo">
+        <div class="title">
+            <img src="{{_res_path}}icon/网络.png" class="icon">
+            网络状态
+            </img>
+        </div>
+        {{if chartData}}
+        <div class="chartBox">
+            <div id="Chart" style="height: 250px"></div>
+            <script src="{{_res_path}}js/chart.js"></script>
+        </div>
+        {{/if}}
+        <div class="data">
+            <div class="upload">
+                <div class="icon">
+                    <img src="{{_res_path}}icon/上传.png">
+                </div>
+                <div class="info">
+                    <p class="text">上传速度</p>
+                    <p class="networkData">{{network.speed.speed.upload.size}}<span
+                            class="unit">{{network.speed.speed.upload.suffix}}/s</span>
+                    </p>
+                </div>
+            </div>
+            <div class="download">
+                <div class="icon">
+                    <img src="{{_res_path}}icon/下载.png">
+                </div>
+                <div class="info">
+                    <p class="text">下载速度</p>
+                    <p class="networkData">{{network.speed.speed.download.size}}<span
+                            class="unit">{{network.speed.speed.download.suffix}}/s</span></p>
+                </div>
+            </div>
+            {{if network.speed.traffic}}
+            <div class="uploadVolume">
+                <div class="icon">
+                    <img src="{{_res_path}}icon/上传流量.png">
+                </div>
+                <div class="info">
+                    <p class="text">上传量</p>
+                    <p class="networkData">{{network.speed.traffic.upload.size}}
+                        <span class="unit">{{network.speed.traffic.upload.suffix}}</span>
+                    </p>
+                </div>
+            </div>
+            <div class="downloadVolume">
+                <div class="icon">
+                    <img src="{{_res_path}}icon/下载流量.png">
+                </div>
+                <div class="info">
+                    <p class="text">下载量</p>
+                    <p class="networkData">{{network.speed.traffic.download.size}}
+                        <span class="unit">{{network.speed.traffic.download.suffix}}</span>
+                    </p>
+                </div>
+            </div>
+            {{/if}}
+        </div>
+    </div>
+    {{/if}} {{if network.psTest}}
+    <div class="psTest">
+        <div class="title">
+            <img src="{{_res_path}}icon/网络测试.png" class="icon">
+            网站测试
+            </img>
+        </div>
+        <div class="data">
+            <div class="row header-row">
+                <div class="cell">网址</div>
+                <div class="cell">状态码</div>
+                <div class="cell">延迟</div>
+            </div>
+            {{each network.psTest}}
+            <div class="row">
+                <div class="cell">{{$value.name}}</div>
+                <div class="cell">{{@$value.status}}</div>
+                <div class="cell">{{@$value.delay}}</div>
+            </div>
+            {{/each}}
+
+        </div>
+    </div>
+    {{/if}}
+</div>
+{{/if}}
+
+{{if redis}}
+<div class="box" data-boxInfo="redis">
+    <div class="title">
+        <img src="{{_res_path}}icon/redis.png" alt="Redis" class="icon">
+        Redis 服务器
+        </img>
+    </div>
+    <div class="data">
+        <div class="info">
+            <div class="state">
+                <span>状态</span>
+                <span class="runState">运行中</span>
+            </div>
+            <div class="version">
+                <span>版本</span>
+                <span>{{redis.redis_version}}</span>
+            </div>
+            <div class="runTime">
+                <div>运行时间</div>
+                <div class="redisTime">{{redis.uptime}}</div>
+            </div>
+        </div>
+        <div class="redisMemory">
+            <div>内存使用
+                {{if !redis.maxmemory}}
+                <span style="font-size: 13px;color: #5b5b5b;">(未设置限制)</span>
+                {{/if}}
+            </div>
+            <div class="memDataNum">{{redis.used_memory_human}}</div>
+            <div class="progressBar">
+                <div class="progress" style="width: {{redis.memoryUsage}};"></div>
+            </div>
+            {{if redis.maxmemory}}
+            <div class="memData">限制: {{redis.maxmemory}}</div>
+            {{else}}
+            <div class="memData">占用物理内存的 {{redis.memoryUsage}}</div>
+            {{/if}}
+            <div class="memData">峰值: {{redis.used_memory_peak_human}}</div>
+        </div>
+        <div class="connected">
+            <div>连接数</div>
+            <div class="connectedNum">{{redis.connected_clients}}</div>
+            <div class="connectedChart" id="connectedChart"></div>
+            <script src="{{_res_path}}js/connectedChart.js"></script>
+            <div>客户端: {{redis.connected_clients}}</div>
+            <div>阻塞:{{redis.blocked_clients}}</div>
+        </div>
+    </div>
+    <div class="keyspace">
+        <div class="title">
+            <img src="{{_res_path}}icon/统计图.png" class="icon">
+            键值统计
+        </div>
+        <div class="data">
+            <div class="row header-row">
+                <div class="cell">DB</div>
+                <div class="cell">Keys</div>
+                <div class="cell">Expires</div>
+                <div class="cell">Avg ttl</div>
+            </div>
+            {{each redis.Keyspace v k}}
+            <div class="row">
+                <div class="cell">{{k}}</div>
+                <div class="cell">{{v.keys}}</div>
+                <div class="cell">{{v.expires}}</div>
+                <div class="cell">{{v.avg_ttl}}</div>
+            </div>
+            {{/each}}
+        </div>
+    </div>
+</div>
+{{/if}}
+
+{{if processLoad}}
+<div class="box" data-boxInfo="进程负载">
+    <div class="info">
+        <div class="title">
+            <img src="{{_res_path}}icon/进程信息.png" class="icon">
+            进程信息
+        </div>
+        <div class="list">
+            <div>全部: <span style="color: #333333;">{{processLoad.all}}</span></div>
+            <div>运行中: <span style="color: #54ad57;">{{processLoad.running}}</span></div>
+            <div>阻塞: <span style="color: #cc8823;">{{processLoad.blocked}}</span></div>
+            <div>休眠: <span style="color: #3698e8;">{{processLoad.sleeping}}</span></div>
+            <div>未知: <span>{{processLoad.unknown}}</span></div>
+        </div>
+    </div>
+    <div class="process">
+        <div class="title">
+            <img src="{{_res_path}}icon/进程列表.png" class="icon">
+            进程列表
+        </div>
+        <div class="form">
+            <div class="row header-row">
+                <div class="cell">Name</div>
+                <div class="cell">Pid</div>
+                <div class="cell" data-sort="{{processLoad.order === " cpu" ? "true" : "false" }}">CPU
+                </div>
+                <div class="cell" data-sort="{{processLoad.order === " mem" ? "true" : "false" }}">MEM
+                </div>
+            </div>
+            {{each processLoad.list v}}
+            {{if v === "hr"}}
+            <hr style="margin: 5px 0" />
+            {{else}}
+            <div class="row" data-state="{{v.state}}">
+                <div class="cell">{{v.name}}</div>
+                {{if v.pid !== false}}
+                <div class="cell">{{v.pid}}</div>
+                {{/if}}
+                <div class="cell">{{v.cpu}}</div>
+                <div class="cell">{{v.mem}}</div>
+            </div>
+            {{/if}}
+            {{/each}}
+        </div>
+    </div>
+
+</div>
+{{/if}}
+
+{{if fastFetch}}
+
+<div class='box fastFetch' data-boxInfo='FastFetch'>
+    <div class='title'>
+        <img src="{{_res_path}}icon/设置.png" class='icon'>系统信息
+    </div>
+    <div class='content'>
+        {{each fastFetch}}
+        <div class='speed'>
+            <p>
+                {{if $value.icon}}
+                <span class="icon" style="color:{{$value.icon.color}}">{{$value.icon.icon}}</span>
+                {{/if}}
+                {{$value.key}}
+            </p>
+            <p>{{$value.value}}</p>
+        </div>
+        {{/each}}
+    </div>
+</div>
+
+{{/if}}
+
+
+
+{{/block}}
