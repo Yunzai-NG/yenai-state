@@ -202,6 +202,15 @@ export default definePlugin({
             return
           }
 
+          /*
+           * 头像要先取，因为取它本身是异步的（要问适配器）
+           *
+           * 放在 `recorder.time` 之外：那一步计的是采集耗时，而问适配器是网络往返，
+           * 混进去会让「采集慢」与「平台响应慢」分不开 —— 后者不是本插件的问题
+           */
+          const selfId = picked.account.record.selfId ?? e.selfId
+          const avatar = await avatarOf(picked.bot, selfId)
+
           const view = await recorder.time(
             buildState({
               config,
@@ -216,14 +225,12 @@ export default definePlugin({
                 since: account.since,
                 retries: account.retries
               })),
-              selfId: picked.account.record.selfId ?? e.selfId,
+              selfId,
               nickname: picked.account.nickname ?? picked.bot?.nickname ?? "",
               status: picked.account.status,
               since: picked.account.since,
               retries: picked.account.retries,
-              ...(picked.account.record.selfId === undefined
-                ? {}
-                : { avatarUrl: avatarOf(picked.account.record.selfId) }),
+              ...(avatar === undefined ? {} : { avatarUrl: avatar }),
               monitor,
               http: ctx.http,
               bgDir: ctx.resource("img", "bg"),
@@ -298,15 +305,41 @@ export default definePlugin({
 })
 
 /**
- * 由平台账号 id 拼出头像地址
+ * 取这个账号的头像地址
  *
- * 用 QQ 头像接口的固定格式，而不是等适配器给 —— `BotApi` 上没有头像字段，而状态图上
- * 少一个头像很显眼。取不到时回落到自带的那张默认头像（见 `collect/bot.ts`）。
+ * 两条来源，顺序与源插件一致：**先问适配器，问不到再按 QQ 号拼接口。**
+ *
+ *   1. `BotApi.getSelfInfo()` 返回的 `UserInfo.avatar` —— 平台给了就用平台给的。
+ *      微信、QQ 频道这类非 QQ 号的适配器只有走这条才有头像
+ *   2. 上面没有、且 `selfId` **是纯数字**（即 QQ 号）时，拼 `q1.qlogo.cn` 的固定格式
+ *
+ * 第 2 条的那个「是纯数字」判断不能省。曾经这里是无条件拼的，于是 stdin 适配器
+ * （`selfId` 是 `stdin`）会去请求 `nk=stdin` —— 那当然 404，使用者看到的是那张默认
+ * 头像，而不是这个账号该有的样子。源插件写的是 `Number(bot.uin) ? ... : "default"`，
+ * 同一个道理。
+ *
+ * 两条都没结果时回 `undefined`，由 `collect/bot.ts` 落到自带的那张默认头像。
+ * @param bot 账号对应的 Bot；未连接时 undefined
  * @param selfId 平台账号 id
- * @returns 头像地址
+ * @returns 头像地址；两条来源都没有时 undefined
  */
-function avatarOf(selfId: string): string {
-  return `https://q1.qlogo.cn/g?b=qq&s=640&nk=${encodeURIComponent(selfId)}`
+export async function avatarOf(bot: BotApi | undefined, selfId: string): Promise<string | undefined> {
+  // 平台自己给的最准，优先
+  const fromAdapter = await bot
+    ?.getSelfInfo()
+    .then(info => info.avatar)
+    .catch(() => undefined)
+  if (fromAdapter !== undefined && fromAdapter !== "") return fromAdapter
+
+  /*
+   * 退到 QQ 头像接口
+   *
+   * `/^\d+$/` 而不是 `Number(selfId)`：后者对 `" "`、`"1e3"`、`"0x10"` 都算数，
+   * 而那些都不是 QQ 号；且它把 `"0123"` 与 `"123"` 看成同一个号。
+   */
+  return /^\d+$/.test(selfId)
+    ? `https://q1.qlogo.cn/g?b=qq&s=640&nk=${encodeURIComponent(selfId)}`
+    : undefined
 }
 
 /**

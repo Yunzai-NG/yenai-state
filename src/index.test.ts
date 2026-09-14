@@ -20,7 +20,8 @@
 import { describe, expect, it } from "vitest"
 import { sep } from "node:path"
 import { CONFIG_SCHEMA } from "./config.js"
-import { toTemplateData } from "./index.js"
+import { avatarOf, toTemplateData } from "./index.js"
+import type { BotApi } from "@yunzai-ng/types"
 import type { StateView } from "./view/build.js"
 
 /**
@@ -159,5 +160,70 @@ describe("toTemplateData", () => {
     // 给数字会让模板输出一个多余的 `transform:scale()`，与 viewport.scale 叠成双重缩放
     const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
     expect((out["sys"] as { scale: string }).scale).toBe("")
+  })
+})
+
+/**
+ * `avatarOf` 的两条来源
+ *
+ * **这条契约是「头像是不是这个账号自己的」。** 曾经这里无条件拼 QQ 头像接口，于是
+ * stdin 适配器（`selfId` 是 `stdin`）会去请求 `nk=stdin` —— 当然 404，使用者看到的
+ * 是那张默认头像。图上"有个头像"和"是这个账号的头像"是两回事，而前者会掩盖后者。
+ *
+ * 源插件的规则是 `Number(bot.uin) ? qq接口 : "default"`，此处与之对齐。
+ */
+describe("avatarOf", () => {
+  /** 造一个只用到 `getSelfInfo` 的 Bot 替身 */
+  const bot = (avatar?: string, fail = false): BotApi =>
+    ({
+      getSelfInfo: () =>
+        fail ? Promise.reject(new Error("平台没响应")) : Promise.resolve({ uid: "u", ...(avatar === undefined ? {} : { avatar }) })
+    }) as unknown as BotApi
+
+  it("平台给了头像就用平台的 —— 非 QQ 号只有这条路", async () => {
+    expect(await avatarOf(bot("https://wx.example/a.png"), "openid_abc")).toBe("https://wx.example/a.png")
+  })
+
+  it("平台给的头像优先于 QQ 接口 —— 即便 id 是个 QQ 号", async () => {
+    // 平台自己给的更准（可能是 CDN 地址或已带参数的地址）
+    expect(await avatarOf(bot("https://cdn.example/1.jpg"), "10001")).toBe("https://cdn.example/1.jpg")
+  })
+
+  it("平台没给、id 是纯数字时拼 QQ 接口", async () => {
+    expect(await avatarOf(bot(), "10001")).toMatch(/^https:\/\/q1\.qlogo\.cn\/.*nk=10001$/)
+  })
+
+  it("**平台没给、id 不是数字时给 undefined** —— 不去请求一个不存在的 QQ 号", async () => {
+    // stdin 适配器的 `selfId` 就是 `stdin`。这里回 undefined 让采集层落到默认头像，
+    // 而不是拼出 `nk=stdin` 去换一个 404
+    expect(await avatarOf(bot(), "stdin")).toBeUndefined()
+    expect(await avatarOf(bot(), "")).toBeUndefined()
+  })
+
+  it("Bot 未连接时退到 QQ 接口 —— 那时问不到平台", async () => {
+    expect(await avatarOf(undefined, "10001")).toMatch(/nk=10001$/)
+    expect(await avatarOf(undefined, "stdin")).toBeUndefined()
+  })
+
+  it("问平台失败不抛出，照常退到 QQ 接口", async () => {
+    // 平台接口报错不该让整张状态图不出来
+    expect(await avatarOf(bot(undefined, true), "10001")).toMatch(/nk=10001$/)
+    expect(await avatarOf(bot(undefined, true), "stdin")).toBeUndefined()
+  })
+
+  it("平台给空串等于没给", async () => {
+    expect(await avatarOf(bot(""), "10001")).toMatch(/nk=10001$/)
+  })
+
+  it("`selfId` 的判数字比 `Number()` 严 —— 那些不是 QQ 号", async () => {
+    // `Number(" ")` 是 0、`Number("1e3")` 是 1000、`Number("0x10")` 是 16，全都算数；
+    // 而它们拼进 `nk=` 都是无效请求
+    for (const id of [" ", "1e3", "0x10", "12.5", "1 2", "+1", "-1"]) {
+      expect(await avatarOf(bot(), id), `${id} 被当成了 QQ 号`).toBeUndefined()
+    }
+  })
+
+  it("QQ 号里的前导零原样保留 —— `Number()` 会把它吃掉", async () => {
+    expect(await avatarOf(bot(), "0123")).toMatch(/nk=0123$/)
   })
 })
