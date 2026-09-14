@@ -13,7 +13,6 @@
 <script>
     var chartData = JSON.parse(`{{@chartData}}`)
     var Config = JSON.parse(`{{@Config}}`)
-    var redisChartData = JSON.parse(`{{@redis.connectionData}}`)
     var _res_path = `{{_res_path}}`
 </script>
 <script src="{{_res_path}}js/modules/echarts.min.js"></script>
@@ -296,79 +295,6 @@
         </div>
     </div>
     {{/if}}
-</div>
-{{/if}}
-
-{{if redis}}
-<div class="box" data-boxInfo="redis">
-    <div class="title">
-        <img src="{{_res_path}}icon/redis.png" alt="Redis" class="icon">
-        Redis 服务器
-        </img>
-    </div>
-    <div class="data">
-        <div class="info">
-            <div class="state">
-                <span>状态</span>
-                <span class="runState">运行中</span>
-            </div>
-            <div class="version">
-                <span>版本</span>
-                <span>{{redis.redis_version}}</span>
-            </div>
-            <div class="runTime">
-                <div>运行时间</div>
-                <div class="redisTime">{{redis.uptime}}</div>
-            </div>
-        </div>
-        <div class="redisMemory">
-            <div>内存使用
-                {{if !redis.maxmemory}}
-                <span style="font-size: 13px;color: #5b5b5b;">(未设置限制)</span>
-                {{/if}}
-            </div>
-            <div class="memDataNum">{{redis.used_memory_human}}</div>
-            <div class="progressBar">
-                <div class="progress" style="width: {{redis.memoryUsage}};"></div>
-            </div>
-            {{if redis.maxmemory}}
-            <div class="memData">限制: {{redis.maxmemory}}</div>
-            {{else}}
-            <div class="memData">占用物理内存的 {{redis.memoryUsage}}</div>
-            {{/if}}
-            <div class="memData">峰值: {{redis.used_memory_peak_human}}</div>
-        </div>
-        <div class="connected">
-            <div>连接数</div>
-            <div class="connectedNum">{{redis.connected_clients}}</div>
-            <div class="connectedChart" id="connectedChart"></div>
-            <script src="{{_res_path}}js/connectedChart.js"></script>
-            <div>客户端: {{redis.connected_clients}}</div>
-            <div>阻塞:{{redis.blocked_clients}}</div>
-        </div>
-    </div>
-    <div class="keyspace">
-        <div class="title">
-            <img src="{{_res_path}}icon/统计图.png" class="icon">
-            键值统计
-        </div>
-        <div class="data">
-            <div class="row header-row">
-                <div class="cell">DB</div>
-                <div class="cell">Keys</div>
-                <div class="cell">Expires</div>
-                <div class="cell">Avg ttl</div>
-            </div>
-            {{each redis.Keyspace v k}}
-            <div class="row">
-                <div class="cell">{{k}}</div>
-                <div class="cell">{{v.keys}}</div>
-                <div class="cell">{{v.expires}}</div>
-                <div class="cell">{{v.avg_ttl}}</div>
-            </div>
-            {{/each}}
-        </div>
-    </div>
 </div>
 {{/if}}
 

@@ -186,7 +186,13 @@ export function looksFakeGpu(name: string): boolean {
  * @returns 环数据；取不到时 undefined
  */
 async function collectCpu(warn: RingWarn): Promise<ResourceRing | undefined> {
-  if (!cpuProbed) void probeCpu(warn)
+  /*
+   * **必须 await，不能 `void`。** 下面第 33 行要读模块级的 `cpuModel`，而它是
+   * `probeCpu()` 异步填进去的 —— `void` 掉之后紧接着读，首次调用必然拿到 `undefined`，
+   * 表现为状态图上 CPU 环没有型号那一行（实机上撞到过）。`cpuProbed` 这个标记只省掉
+   * 后续调用，故只有第一次多等一次 `si.cpu()`，代价可忽略。
+   */
+  if (!cpuProbed) await probeCpu(warn)
 
   let load: number | undefined
   try {
@@ -221,7 +227,8 @@ async function collectCpu(warn: RingWarn): Promise<ResourceRing | undefined> {
  * @returns 环数据；取不到时 undefined
  */
 async function collectRam(warn: RingWarn): Promise<ResourceRing | undefined> {
-  if (!memoryProbed) void probeMemoryAndGpu(warn)
+  // 同上，必须 await：下面的 `memoryClock` 由那次探测填入
+  if (!memoryProbed) await probeMemoryAndGpu(warn)
 
   let total = 0
   let used = 0
@@ -304,7 +311,8 @@ async function collectSwap(warn: RingWarn): Promise<ResourceRing | undefined> {
  * @returns 环数据；取不到时 undefined
  */
 async function collectGpu(warn: RingWarn): Promise<ResourceRing | undefined> {
-  if (!gpuProbed) void probeMemoryAndGpu(warn)
+  // 同上，必须 await：下面的 `gpuModels` 由那次探测填入
+  if (!gpuProbed) await probeMemoryAndGpu(warn)
 
   let cards: Awaited<ReturnType<typeof probeGpus>>
   try {

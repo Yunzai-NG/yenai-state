@@ -1,7 +1,7 @@
 /* eslint-disable no-undef */
 
 const {
-  BotNameColor, progressBarColor, redisInfoValColor, startColumn, botInfoColor
+  BotNameColor, progressBarColor, startColumn, botInfoColor
 } = Config.style
 // 修改BotNameColor
 const botNameElements = document.querySelectorAll(".header h1")
@@ -59,13 +59,6 @@ if (columnCount >= 2 && startColumn) {
 }
 containerElement.style.width = containerElementWidth + "px"
 
-// 自定义redis颜色
-document.addEventListener("DOMContentLoaded", function() {
-  const redisValElement = document.querySelectorAll(".redisBox .number")
-  redisValElement.forEach(element => {
-    element.style.color = redisInfoValColor ?? "#485ab6"
-  })
-})
 // 硬盘统一宽度
 const hardDiskLieElements = document.querySelectorAll(".HardDisk_li .mount")
 let maxWidth = -Infinity

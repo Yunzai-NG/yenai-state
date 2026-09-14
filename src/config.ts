@@ -4,7 +4,7 @@
  * 生命周期：模块加载期构造一次，之后只读
  * 注意事项：**字段名与源插件（椰奶）的 `state.yaml` 逐一对齐，取值形态也对齐。** 这是刻意的：
  *          从椰奶迁过来的使用者应当能把原来的 yaml 抄进来，而不是面对一套近义的新名字。
- *          因此 `showRedisInfo` / `showFastFetch` / `processLoad.show` 这些项保留了源插件的
+ *          因此 `showFastFetch` / `processLoad.show` 这些项保留了源插件的
  *          `true | false | pro` 三态语义，而不是被"改良"成布尔 —— 三态里 `pro` 与 `true` 的区别
  *          是使用者实际依赖的（"只在状态pro里显示"）。
  *
@@ -76,14 +76,6 @@ export const CONFIG_SCHEMA = s.object({
     .order(10),
 
   /* ────────────────────────────── 各板块的显隐 ────────────────────────────── */
-
-  showRedisInfo: s
-    .select([...SHOW_MODES])
-    .default("true")
-    .title("Redis 信息")
-    .desc("Redis 的连接数、内存占用与键值统计。未连接 Redis 时本板块自动隐去")
-    .group("板块显隐")
-    .order(20),
 
   showFastFetch: s
     .select([
@@ -308,7 +300,6 @@ export const CONFIG_SCHEMA = s.object({
             .desc("可填多个，各环与各磁盘依次取用，取完从头再来。只有一个时全部使用该色")
         })
         .title("进度条配色"),
-      redisInfoValColor: s.string().default("#485ab6").title("Redis 数值颜色").desc("Redis 板块里数字的颜色"),
       botInfoColor: s
         .object({
           botVersion: s.string().default("#FBE0F3").title("版本标签底色").desc("版本号标签的背景色"),

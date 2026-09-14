@@ -17,7 +17,7 @@
  */
 
 import type { HttpClient, Logger } from "@yunzai-ng/types"
-import { parseDuration, formatBytes, formatDuration } from "@yunzai-ng/core"
+import { parseDuration } from "@yunzai-ng/core"
 import type { StateConfigRO, ShowMode } from "../config.js"
 import { showFor, showFastFetchFor } from "../config.js"
 import { markUsage } from "../util/debug.js"
@@ -31,8 +31,6 @@ import { toNetworkView, probeSites } from "../collect/network.js"
 import type { NetworkView, SiteResult } from "../collect/network.js"
 import { collectProcesses } from "../collect/process.js"
 import type { ProcessView } from "../collect/process.js"
-import { toRedisView } from "../collect/redis.js"
-import type { RedisView } from "../collect/redis.js"
 import { collectBot, collectAdapters } from "../collect/bot.js"
 import type { BotView, AdapterView } from "../collect/bot.js"
 import { collectSystem } from "../collect/system.js"
@@ -65,8 +63,6 @@ export interface StateView {
   readonly sites?: readonly SiteResult[]
   /** 进程表；未开启或取不到时 undefined */
   readonly process?: ProcessView
-  /** Redis；未开启、没连上或解析不出时 undefined */
-  readonly redis?: RedisView
   /** fastfetch；没装时 undefined */
   readonly fastfetch?: FastfetchView
   /** 本次是否为 pro */
@@ -85,8 +81,6 @@ export interface StyleValues {
   readonly startColumn: boolean
   /** 账号名的颜色 */
   readonly botNameColor: string
-  /** Redis 各数值的颜色 */
-  readonly redisInfoValColor: string
   /** 进度条高档配色（占用 ≥ 90%） */
   readonly highColor: string
   /** 进度条中档配色（占用 ≥ 80%） */
@@ -135,13 +129,6 @@ export interface BuildInput {
   readonly groupCount?: number
   /** 采样器 */
   readonly monitor: Monitor
-  /**
-   * Redis 句柄；没连 Redis 时为 undefined
-   *
-   * 类型只声明用得到的那一个方法，不引 ioredis 的类型 —— 本插件不该为读一次 `INFO`
-   * 而依赖一个具体的 Redis 客户端实现。调用方传内核给的句柄即可。
-   */
-  readonly redisClient?: { info(): Promise<string> }
   /** 内核的 HTTP 客户端 */
   readonly http: HttpClient
   /** 自带背景图目录的绝对路径 */
@@ -188,7 +175,6 @@ export function styleVars(style: StateConfigRO["style"]): string {
     `--high-color:${progress.high[0] ?? "#F44336"}`,
     `--medium-color:${progress.medium[0] ?? "#FF9800"}`,
     `--low-color:${progress.low[0] ?? "#2EC272"}`,
-    `--redis-val-color:${style.redisInfoValColor}`,
     `--bot-name-color:${style.BotNameColor}`
   ].join(";")
 }
@@ -219,7 +205,6 @@ export async function buildState(input: BuildInput): Promise<StateView> {
    */
   const wantProcess = on(config.processLoad.show, isPro)
   const wantSites = on(config.psTestSites.show, isPro)
-  const wantRedis = on(config.showRedisInfo, isPro)
   const wantCharts = on(config.chartsCfg.show, isPro)
   const wantFastfetch = showFastFetchFor(config.showFastFetch, isPro, isWindows())
   const wantCounts = isPro
@@ -233,7 +218,6 @@ export async function buildState(input: BuildInput): Promise<StateView> {
     network,
     sites,
     process,
-    redis,
     bot,
     system,
     fastfetch,
@@ -279,7 +263,6 @@ export async function buildState(input: BuildInput): Promise<StateView> {
           return undefined
         })
       : Promise.resolve(undefined),
-    wantRedis ? collectRedis(input, warn("redis")) : Promise.resolve(undefined),
     collectBot(
       {
         nickname: input.nickname,
@@ -345,7 +328,6 @@ export async function buildState(input: BuildInput): Promise<StateView> {
     ...(network === undefined ? {} : { network }),
     ...(sites === undefined || sites.length === 0 ? {} : { sites }),
     ...(process === undefined ? {} : { process }),
-    ...(redis === undefined ? {} : { redis }),
     ...(fastfetch === undefined ? {} : { fastfetch }),
     isPro,
     chart,
@@ -353,35 +335,10 @@ export async function buildState(input: BuildInput): Promise<StateView> {
       vars: styleVars(config.style),
       startColumn: config.style.startColumn,
       botNameColor: config.style.BotNameColor,
-      redisInfoValColor: config.style.redisInfoValColor,
       highColor: config.style.progressBarColor.high[0] ?? "#F44336",
       mediumColor: config.style.progressBarColor.medium[0] ?? "#FF9800",
       lowColor: config.style.progressBarColor.low[0] ?? "#2EC272"
     }
-  }
-}
-
-/**
- * 取 Redis 的 `INFO` 并解析
- *
- * **这里刻意不 catch 后返回 undefined 之外的任何东西**：没连 Redis 时 `ctx.redis` 是
- * undefined，那是一种正常配置，不是错误 —— 静默跳过，不记日志。
- * @param input 全部输入
- * @param warn 告警
- * @returns 板块数据；没连或解析不出时 undefined
- */
-async function collectRedis(
-  input: BuildInput,
-  warn: (message: string, err: unknown) => void
-): Promise<RedisView | undefined> {
-  const redis = input.redisClient
-  if (redis === undefined) return undefined
-  try {
-    const text = await redis.info()
-    return toRedisView(text, formatBytes, seconds => formatDuration(seconds * 1000))
-  } catch (err) {
-    warn("读取 Redis INFO 失败", err)
-    return undefined
   }
 }
 

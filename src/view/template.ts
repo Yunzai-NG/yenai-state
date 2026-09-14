@@ -19,8 +19,6 @@ import type { StateView } from "./build.js"
 import type { ResourceRing } from "../collect/resources.js"
 import { RING_PERIMETER } from "../collect/resources.js"
 import type { DiskView } from "../collect/disk.js"
-import type { RedisKeyspaceEntry, RedisView } from "../collect/redis.js"
-import { infoNumber, parseInfo } from "../collect/redis.js"
 import type { FastfetchView } from "../collect/fastfetch.js"
 import type { ProcessView } from "../collect/process.js"
 import type { FileSizeParts } from "../util/format.js"
@@ -116,17 +114,6 @@ export interface StateTemplateData {
     /** 对外连通性测试 */
     readonly psTest?: readonly SiteRow[]
   }
-  /**
-   * Redis 板块
-   *
-   * **即便没连上 Redis 也必须给一个值。** 模板第 16 行是
-   * `var redisChartData = JSON.parse(`{{@redis.connectionData}}`)` —— 它在 `{{if redis}}`
-   * **之外**，无论有没有 Redis 都要执行一次。不给这个变量，`redis` 就是 undefined，
-   * 渲染时抛 `Cannot read properties of undefined (reading 'connectionData')`，
-   * **整张状态图都出不来**（实机上撞到过）。给空壳后，`{{if redis}}` 那一块因为
-   * 各字段为空而正常跳过 —— 没配 Redis 的部署本来就不该看到那一块。
-   */
-  readonly redis: TemplateRedis
   /** 进程表 */
   readonly processLoad?: ProcessView
   /** fastfetch */
@@ -138,46 +125,6 @@ export interface StateTemplateData {
    * 也在任何 `{{if}}` 之外。取不到背景时给空串，`url()` 落空即回落到 CSS 里的底色。
    */
   readonly style: StateView["style"] & { readonly backdrop: string }
-}
-
-/**
- * Redis 板块在模板里的形状
- *
- * **字段名用的是 `INFO` 自己的键名，不是驼峰。** `templates/state.html` 读的是
- * `redis.redis_version` / `redis.used_memory_human` / `redis.maxmemory` /
- * `redis.connectionData` 这些 —— 它们是原插件从 `INFO` 里直接取的原始名字。把模板改成读
- * 驼峰字段要连 CSS 的类名与 `resources/js/connectedChart.js` 一起动（那个脚本按元素 id
- * 取数据），不如在这一层翻译一次。
- *
- * 几个不是直接照搬 `INFO` 的字段单独说明：
- * - `memoryUsage`：**模板同时把它当进度条宽度与百分数文字用**（一行 `style="width: ..."`
- *   的 `<div>`，另一行「占用物理内存的 X」）。故它必须带 `%`，且只能是一个值。
- * - `connectionData`：给 `resources/js/connectedChart.js` 的 JSON 串，形如 `[时间, 连接数][]`。
- *   连上 Redis 只发生在这一次渲染里，没有历史序列可取，故给一个单点。
- * - `Keyspace`：`{{each redis.Keyspace v k}}` 遍历它，故必须是对象（`each` 遍历对象时
- *   `k` 是键、`v` 是值），且值上要有 `keys` / `expires` / `avg_ttl` 三个字段。
- */
-export interface TemplateRedis {
-  /** 版本号 */
-  readonly redis_version: string
-  /** 运行时长，`INFO` 里那个 `3天 04:05:06` 形式的串 */
-  readonly uptime: string
-  /** 是否限制了最大内存；模板据此决定显示「限制」还是「占用物理内存的 X」 */
-  readonly maxmemory: string
-  /** 已用内存，`INFO` 给的 `1.00M` 这类短串 */
-  readonly used_memory_human: string
-  /** 峰值内存 */
-  readonly used_memory_peak_human: string
-  /** 已用内存占上限的百分比，带 `%`；模板既当宽度也当文字 */
-  readonly memoryUsage: string
-  /** 已连接的客户端数 */
-  readonly connected_clients: string
-  /** 阻塞的客户端数 */
-  readonly blocked_clients: string
-  /** 各库的键值统计，键名形如 `db0` */
-  readonly Keyspace: Readonly<Record<string, RedisKeyspaceEntry>>
-  /** 连接数曲线，JSON 串 */
-  readonly connectionData: string
 }
 
 /** 磁盘读写速率在模板里的一行 */
@@ -310,77 +257,6 @@ export function statusIcon(status: string): string {
 }
 
 /**
- * 把 `RedisView` 翻译成模板读的那套 `INFO` 键名
- *
- * **这是本插件里唯一一处"名字对不上"需要逐个映射的地方**，其余板块的名字要么本来就一致，
- * 要么在采集层就照模板取的。这里逐个说明几个不能照搬的：
- *
- * - `memoryUsage`：`INFO` 里没有这个键。源插件算的是「已用 / 上限」，没有上限时改用
- *   「已用 / 物理内存总量」。模板把它同时当进度条宽度与百分数文字，故必须带 `%`。
- *   **上限为 0 或缺 `maxmemory` 时不写 `0%`** —— 那会被读成"一点没用"，而真相是
- *   "没有上限可比"；此时按物理内存算，物理内存也取不到才退到 `0%`。
- * - `uptime`：`INFO` 给的是 `uptime_in_seconds`（秒数），模板那一格要的是人话，
- *   故用采集层已经格式化好的那个串。
- * - `connectionData`：`resources/js/connectedChart.js` 要的是一串坐标。这里只在渲染的
- *   那一瞬间连了一次 Redis，拿不到历史，故给一个单点 —— 图上只有一个点，是诚实的呈现
- *   （"只采过一次"）。源插件靠模块级的定时采样攒点，本插件的采样器只采 CPU/内存/网络/IO，
- *   不含连接数，故这里没有历史可给。
- * - `redis_version` / `used_memory_human` / `used_memory_peak_human` / `connected_clients` /
- *   `blocked_clients`：`INFO` 里本来就有，直接取；取不到时给空串而不是 `undefined`，
- *   免得模板印出 `undefined`。
- * @param redis 采集结果
- * @param totalMemoryBytes 物理内存总量，用于没设 `maxmemory` 时算占用比；取不到时 0
- * @returns 模板数据
- */
-export function toTemplateRedis(redis: RedisView, totalMemoryBytes: number): TemplateRedis {
-  const info = parseInfo(redis.raw)
-  const text = (key: string): string => info.get(key) ?? ""
-
-  const usedBytes = infoNumber(info, "used_memory") ?? 0
-  const maxBytes = infoNumber(info, "maxmemory") ?? 0
-  // 有上限就按上限算，没有就按物理内存算；两者都没有时下限到 0，`memoryUsage` 会是 `0%`
-  const basis = maxBytes > 0 ? maxBytes : totalMemoryBytes
-  const ratio = basis > 0 ? Math.min(100, (usedBytes / basis) * 100) : 0
-
-  return {
-    redis_version: text("redis_version"),
-    uptime: redis.uptime,
-    // 空串表示"没设限制"，模板里 `{{if !redis.maxmemory}}` 正是这么判断的
-    maxmemory: text("maxmemory") === "0" ? "" : text("maxmemory"),
-    used_memory_human: text("used_memory_human"),
-    used_memory_peak_human: text("used_memory_peak_human"),
-    memoryUsage: `${ratio.toFixed(1)}%`,
-    connected_clients: text("connected_clients"),
-    blocked_clients: text("blocked_clients"),
-    Keyspace: redis.keyspace,
-    connectionData: JSON.stringify([[Date.now(), redis.clients]])
-  }
-}
-
-/**
- * 没连上 Redis 时给的空壳
- *
- * 每一项都取"看不出内容"的值而不是 `undefined`：`{{if redis.maxmemory}}` 之类要能正常
- * 判假，`{{each redis.Keyspace}}` 要能正常空转。`connectionData` 给一个空数组的 JSON ——
- * 模板那句 `JSON.parse()` 会照常成功，而图表脚本拿到空数组就画一张空网格。
- * @returns 各字段皆为空的模板数据
- */
-function emptyRedis(): TemplateRedis {
-  return {
-    redis_version: "",
-    uptime: "",
-    maxmemory: "",
-    used_memory_human: "",
-    used_memory_peak_human: "",
-    memoryUsage: "0%",
-    connected_clients: "",
-    blocked_clients: "",
-    Keyspace: {},
-    connectionData: "[]"
-  }
-}
-
-/**
  * 拼出模板要的一整个对象
  * @param view 采集结果
  * @param chartConfig 交给前端 echarts 的配置，通常是空对象（源插件的 `Config` 只放了主题名）
@@ -411,12 +287,6 @@ export function toTemplate(view: StateView, chartConfig: Record<string, unknown>
             ...(view.sites === undefined ? {} : { psTest: view.sites })
           }
         }),
-    // 见 `TemplateRedis` 与 `style` 的说明：这两个的缺失会让**整张图**渲染不出来，
-    // 故不参与上面那种"没有就不给"的写法，一律给足
-    redis:
-      view.redis === undefined
-        ? emptyRedis()
-        : toTemplateRedis(view.redis, view.system.totalMemoryBytes),
     ...(view.process === undefined ? {} : { processLoad: view.process }),
     ...(view.fastfetch === undefined ? {} : { fastFetch: view.fastfetch.lines }),
     /*

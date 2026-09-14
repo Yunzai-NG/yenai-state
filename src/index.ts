@@ -23,6 +23,7 @@ import { join } from "node:path"
 import { definePlugin, parseDuration } from "@yunzai-ng/core"
 import type { AccountState, BotApi, Logger, MessageEvent } from "@yunzai-ng/types"
 import { CONFIG_SCHEMA } from "./config.js"
+import type { StateConfigRO } from "./config.js"
 import { Monitor } from "./monitor.js"
 import { buildState } from "./view/build.js"
 import type { StateView } from "./view/build.js"
@@ -240,7 +241,7 @@ export default definePlugin({
           await replyImage(
             e,
             () =>
-              ctx.render(STATE_TEMPLATE, toTemplateData(view, ctx), {
+              ctx.render(STATE_TEMPLATE, toTemplateData(view, ctx, config), {
                 selector: "#container",
                 type: "jpeg",
                 quality: 92
@@ -278,7 +279,7 @@ export default definePlugin({
         await replyImage(
           e,
           () =>
-            ctx.render(MONITOR_TEMPLATE, toTemplateData(view, ctx), {
+            ctx.render(MONITOR_TEMPLATE, toTemplateData(view, ctx, config), {
               selector: "#container",
               type: "jpeg",
               quality: 92
@@ -323,15 +324,32 @@ function avatarOf(selfId: string): string {
  * 路径，拿它拼出绝对路径交给渲染器即可 —— 渲染器的 `resolveTemplate` 明说绝对路径原样通行。
  *
  * 顺带把 `StateView` / `MonitorView` 翻译成模板认的那些变量名（见 `view/template.ts` 的文件头）。
+ *
+ * **`Config` 要把前端脚本读的那几项给全。** 两个脚本都在文件开头就解构 `Config`：
+ * `js/chart.js` 读 `Config.chartsCfg.color`，`js/style.js` 读 `Config.style` 的
+ * `BotNameColor` / `progressBarColor` / `startColumn` / `botInfoColor` 等项。
+ * 少给一项就在那一行抛 `TypeError`，**整个脚本从此不执行** —— 曲线图一块空白、配色全部
+ * 落回 CSS 里的默认值（实机上撞到过）。这两项都是使用者的配置，故原样从配置里取。
+ *
+ * 把整个 `config.style` 递出去而不是逐个挑字段：脚本要哪几项由脚本决定，这里逐个挑
+ * 等于把那份清单抄了两遍，脚本那侧一改就漏。`Config` 是 JSON 串，多带的字段无害。
  * @param data 采集结果
  * @param ctx 插件上下文
+ * @param config 插件配置
  * @returns 可直接交给 `ctx.render()` 的数据
  */
-function toTemplateData(
+export function toTemplateData(
   data: StateView | MonitorView,
-  ctx: { readonly root: string }
+  ctx: { readonly root: string },
+  config: StateConfigRO
 ): Record<string, unknown> {
-  const translated = "resources" in data ? toTemplate(data) : data
+  const translated =
+    "resources" in data
+      ? toTemplate(data, {
+          chartsCfg: { color: [...config.chartsCfg.color] },
+          style: config.style
+        })
+      : data
   return {
     ...translated,
     defaultLayout: join(ctx.root, "templates", LAYOUT_FILE),

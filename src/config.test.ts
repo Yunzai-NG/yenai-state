@@ -82,7 +82,6 @@ describe("CONFIG_SCHEMA", () => {
       "defaultState",
       "noPro",
       "systemResources",
-      "showRedisInfo",
       "showFastFetch",
       "chartsCfg",
       "psTestSites",
@@ -99,7 +98,6 @@ describe("CONFIG_SCHEMA", () => {
 
     // `showFastFetch` 多一个 `default`，故不放进这个循环
     for (const [name, value] of [
-      ["showRedisInfo", cfg.showRedisInfo],
       ["chartsCfg.show", cfg.chartsCfg.show],
       ["psTestSites.show", cfg.psTestSites.show],
       ["processLoad.show", cfg.processLoad.show]
@@ -125,7 +123,7 @@ describe("CONFIG_SCHEMA", () => {
   })
 
   it("拒绝非法的三态取值", () => {
-    expect(CONFIG_SCHEMA.safeParse({ showRedisInfo: "maybe" }).ok).toBe(false)
+    expect(CONFIG_SCHEMA.safeParse({ chartsCfg: { show: "maybe" } }).ok).toBe(false)
     expect(CONFIG_SCHEMA.safeParse({ showFastFetch: "always" }).ok).toBe(false)
   })
 
