@@ -353,6 +353,8 @@ function emptyBot(input: BuildInput): BotView {
     uin: input.selfId,
     avatar: "",
     status: "未知",
+    // 原文给空串：`statusIcon` 认不出时会退到最中性的那个图标
+    statusKey: "",
     statusColor: "#8a8a8a",
     since: "未知",
     retries: input.retries,

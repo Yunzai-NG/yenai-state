@@ -29,8 +29,16 @@ export interface BotView {
   readonly uin: string
   /** 头像的 `data:` URL，或本地默认头像的 `file://` 地址 */
   readonly avatar: string
-  /** 在线状态文案 */
+  /** 在线状态文案，已翻译成中文 */
   readonly status: string
+  /**
+   * 状态的原文，即内核的 `AccountStatus`
+   *
+   * 与上面那个中文文案并存，是因为**两者各有各的用处、不能互相推导**：文案是给模板
+   * 显示的，而在线小圆点的图标文件名要按原文去查（`online` → `11.png`）。拿中文去
+   * 反推图标会拼出 `icon/在线.png` —— 图标目录里没有这个文件，圆点永远是空白。
+   */
+  readonly statusKey: string
   /** 状态对应的配色 */
   readonly statusColor: string
   /** 好友数；取不到时不出现 */
@@ -217,6 +225,8 @@ export async function collectBot(
     uin: input.selfId,
     avatar,
     status: status.text,
+    // 原文原样带上，认不出的词也给 —— 取图标时再退到中性图标
+    statusKey: input.status ?? "",
     statusColor: status.color,
     // 0 与 undefined 的区别是有意义的：`friendCount: 0` 说明确实一个好友都没有，
     // 而 undefined 说明没去数（省时间）或还没连上、这个数还不知道

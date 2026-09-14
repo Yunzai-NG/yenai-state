@@ -232,7 +232,8 @@ export function toBotCards(view: StateView): BotCard[] {
     {
       nickname: bot.nickname,
       ...(bot.avatar === "" ? {} : { avatar: { path: bot.avatar } }),
-      status: statusIcon(bot.status),
+      // 按状态原文取图标，不是按中文文案 —— 见 statusIcon 的注释
+      status: statusIcon(bot.statusKey),
       botVersion: `v${view.system.version}`,
       platform: view.adapters.map(adapter => adapter.name).join(" / "),
       botRunTime: bot.uptime,
@@ -243,17 +244,37 @@ export function toBotCards(view: StateView): BotCard[] {
 }
 
 /**
- * 把状态中文反推成图标的文件名
+ * 把账号状态映射成在线小圆点的图标文件名
  *
- * 模板里写的是 `{{_res_path}}icon/{{$value.status}}.png`，故这里要给出的是**文件名**，
- * 不是文案。图标文件是现成的：在线.png / 离线.png / 连接中.png / 出错.png。
- * 认不出的一律给「离线」—— 那个图标最中性。
- * @param status 状态文案
- * @returns 图标文件名（不含扩展名）
+ * 模板里写的是 `{{_res_path}}icon/{{$value.status}}.png`，故这里要给出的是**文件名**。
+ *
+ * **映射的输入是内核的 `AccountStatus` 原文（`bot.statusKey`），不是那层中文文案。** 源插件的
+ * `status` 直接就是 QQ 的状态码（`const { status = 11 } = bot`），模板于是拼出
+ * `icon/11.png` —— `icon/` 里那六个 `11/31/41/50/60/70.png` 正是 QQ 的在线状态码。
+ * 本移植版把 `status` 改成了中文，若仍拿文案去反推文件名，拼出的是
+ * `icon/在线.png`，而图标目录里没有这个文件，圆点就永远是一块空白（实机上撞到过）。
+ *
+ * 故这里按 `AccountStatus` 的五种取值直接落到源插件那几个码上，中文文案只作展示、
+ * 不参与取图标。
+ * @param status 内核的 `AccountStatus` 原文
+ * @returns 图标文件名（不含扩展名）；只含数字，故不会出现路径分隔符
  */
 export function statusIcon(status: string): string {
-  const known = ["在线", "离线", "连接中", "出错", "未知"]
-  return known.includes(status) ? status : "离线"
+  /*
+   * 五个取值映到源插件的六个状态码里最贴切的那个：
+   * 11 = 我在线上，31 = 离开，41 = 隐身，50 = 忙碌，70 = 请勿打扰。
+   * `disabled` 用 41（隐身）—— 那个号根本没登，画成隐身最不误导。
+   */
+  const byStatus: Record<string, string> = {
+    online: "11",
+    connecting: "31",
+    offline: "41",
+    error: "50",
+    disabled: "41"
+  }
+  // 认不出的一律给 41：内核之外的状态词（适配器自定义的 `mute` 之类）无从对应，
+  // 而「隐身」是几个码里最中性的一个
+  return byStatus[status] ?? "41"
 }
 
 /**

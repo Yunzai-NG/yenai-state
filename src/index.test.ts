@@ -50,6 +50,7 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
       uin: "10001",
       avatar: "",
       status: "在线",
+      statusKey: "online",
       statusColor: "#2EC272",
       since: "2026-09-01 10:00:00",
       retries: 0,

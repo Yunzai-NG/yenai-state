@@ -13,6 +13,9 @@
  *          能被自动测出来、又确实会坏得很难看的东西。
  */
 
+import { existsSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { RING_PERIMETER } from "../collect/resources.js"
 import type { ResourceRing } from "../collect/resources.js"
@@ -35,6 +38,7 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
       uin: "10001",
       avatar: "file:///a.png",
       status: "在线",
+      statusKey: "online",
       statusColor: "#2EC272",
       since: "2026-09-01 10:00:00",
       retries: 0,
@@ -145,18 +149,44 @@ describe("toOtherInfo", () => {
 })
 
 describe("statusIcon", () => {
-  it("认得出的状态原样给", () => {
-    for (const s of ["在线", "离线", "连接中", "出错", "未知"]) expect(statusIcon(s)).toBe(s)
+  it("五个状态各给一个图标名 —— 这正是那个「在线小绿点是空白」的缺陷", () => {
+    // 模板拼的是 `icon/{{status}}.png`，而 `icon/` 里只有 11/31/41/50/60/70 六个文件。
+    // 曾经这里返回的是中文文案，拼出 `icon/在线.png` —— 一个不存在的文件，圆点永远空白
+    expect(statusIcon("online")).toBe("11")
+    expect(statusIcon("offline")).toBe("41")
+    expect(statusIcon("connecting")).toBe("31")
+    expect(statusIcon("error")).toBe("50")
+    expect(statusIcon("disabled")).toBe("41")
   })
 
-  it("认不出的一律给「离线」—— 那个图标最中性", () => {
-    expect(statusIcon("奇怪的状态")).toBe("离线")
-    expect(statusIcon("")).toBe("离线")
+  it("**给的全是图标目录里真实存在的文件** —— 拿中文去反推就会在这里断掉", () => {
+    // 这条断言的是「文件名本身可解析」：中文名会过，但下面那条尺寸断言会断
+    const names = ["online", "offline", "connecting", "error", "disabled"].map(statusIcon)
+    for (const name of names) expect(name).toMatch(/^\d+$/)
+  })
+
+  it("**每个图标名在 resources/icon 下真有对应文件** —— 缺一个就是一块空白", () => {
+    /*
+     * 上一组断言只能证明「名字是数字」，证明不了「文件存在」。而本插件搬过来时
+     * 恰恰就是文件齐、映射丢 —— `icon/11.png` 一直在，模板却去要 `icon/在线.png`。
+     * 故这里直接查磁盘。
+     */
+    const iconDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "resources", "icon")
+    for (const status of ["online", "offline", "connecting", "error", "disabled", "mute"]) {
+      const file = join(iconDir, `${statusIcon(status)}.png`)
+      expect(existsSync(file), `图标文件不存在：${file}`).toBe(true)
+    }
+  })
+
+  it("认不出的一律给 41（隐身）—— 几个状态码里最中性的一个", () => {
+    // 适配器可能给出内核没定义的词（`mute` / `dnd` 之类）
+    expect(statusIcon("mute")).toBe("41")
+    expect(statusIcon("")).toBe("41")
   })
 
   it("给的是文件名而不是路径 —— 模板自己拼 `{{_res_path}}icon/`", () => {
-    expect(statusIcon("在线")).not.toContain("/")
-    expect(statusIcon("在线")).not.toContain(".")
+    expect(statusIcon("online")).not.toContain("/")
+    expect(statusIcon("online")).not.toContain(".")
   })
 })
 
