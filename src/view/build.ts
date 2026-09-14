@@ -33,7 +33,7 @@ import { collectProcesses } from "../collect/process.js"
 import type { ProcessView } from "../collect/process.js"
 import { collectBot, collectAdapters } from "../collect/bot.js"
 import type { BotView, AdapterView } from "../collect/bot.js"
-import { collectSystem } from "../collect/system.js"
+import { collectSystem, copyrightLine } from "../collect/system.js"
 import type { SystemView } from "../collect/system.js"
 import { collectFastfetch } from "../collect/fastfetch.js"
 import type { FastfetchView } from "../collect/fastfetch.js"
@@ -97,6 +97,8 @@ export interface BuildInput {
   readonly isPro: boolean
   /** 框架版本 */
   readonly version: string
+  /** 本插件的版本；只有版权行用它 */
+  readonly pluginVersion: string
   /** 插件数 */
   readonly pluginCount: number
   /** 命令数 */
@@ -287,6 +289,7 @@ export async function buildState(input: BuildInput): Promise<StateView> {
     }),
     collectSystem({
       version: input.version,
+      pluginVersion: input.pluginVersion,
       pluginCount: input.pluginCount,
       commandCount: input.commandCount,
       adapterCount: input.adapters.length
@@ -387,7 +390,7 @@ function emptySystem(input: BuildInput): SystemView {
     pluginCount: input.pluginCount,
     commandCount: input.commandCount,
     nodeVersion: process.version,
-    copyright: `Powered by <span style='color:#0077ff'>Yunzai-NG</span> ${input.version}`
+    copyright: copyrightLine(input.version, input.pluginVersion)
   }
 }
 

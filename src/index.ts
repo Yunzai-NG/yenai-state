@@ -19,6 +19,7 @@
  *          而那两个词在正则里的先后是明确的。
  */
 
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { definePlugin, parseDuration } from "@yunzai-ng/core"
 import type { AccountState, BotApi, Logger, MessageEvent } from "@yunzai-ng/types"
@@ -31,6 +32,7 @@ import { buildMonitor, describeInterval, pointCount } from "./view/monitor.js"
 import type { MonitorView } from "./view/monitor.js"
 import { toTemplate } from "./view/template.js"
 import { collectBackdrop } from "./view/style.js"
+import { copyrightLine } from "./collect/system.js"
 import { DebugRecorder } from "./util/debug.js"
 
 /** 状态图的模板名（相对本插件的 `templates/` 目录） */
@@ -115,6 +117,16 @@ export default definePlugin({
         logger.warn(`首次采样失败：${err instanceof Error ? err.message : String(err)}`)
       })
     }
+
+    /*
+     * 两个版本号，给版权行用
+     *
+     * 框架版本在运行期固定、插件版本更是编译期常量，故在这里取一次即可 —— 与 `startup`
+     * 不同，它们不会在 WebUI 里被改。插件版本从自己的 `package.json` 读（`PLUGIN_VERSION`
+     * 在文件末尾由 `createRequire` 取），不写死一个字符串：写死的话改了 `package.json`
+     * 的版本号、图上还是旧的那个，而那种不一致最难被察觉。
+     */
+    const versions = { framework: ctx.app.version, plugin: PLUGIN_VERSION }
 
     /** 互斥锁：同时只渲染一张图，见文件头 */
     let busy = false
@@ -215,7 +227,8 @@ export default definePlugin({
             buildState({
               config,
               isPro,
-              version: ctx.app.version,
+              version: versions.framework,
+              pluginVersion: versions.plugin,
               pluginCount: ctx.app.plugins.list().length,
               commandCount: ctx.app.plugins.commands().length,
               adapters: ctx.app.adapters.list().map(adapter => ({ id: adapter.id, name: adapter.name })),
@@ -248,7 +261,7 @@ export default definePlugin({
           await replyImage(
             e,
             () =>
-              ctx.render(STATE_TEMPLATE, toTemplateData(view, ctx, config), {
+              ctx.render(STATE_TEMPLATE, toTemplateData(view, ctx, config, versions), {
                 selector: "#container",
                 type: "jpeg",
                 quality: 92
@@ -286,7 +299,7 @@ export default definePlugin({
         await replyImage(
           e,
           () =>
-            ctx.render(MONITOR_TEMPLATE, toTemplateData(view, ctx, config), {
+            ctx.render(MONITOR_TEMPLATE, toTemplateData(view, ctx, config, versions), {
               selector: "#container",
               type: "jpeg",
               quality: 92
@@ -369,12 +382,14 @@ export async function avatarOf(bot: BotApi | undefined, selfId: string): Promise
  * @param data 采集结果
  * @param ctx 插件上下文
  * @param config 插件配置
+ * @param versions 两个版本号，给版权行用
  * @returns 可直接交给 `ctx.render()` 的数据
  */
 export function toTemplateData(
   data: StateView | MonitorView,
   ctx: { readonly root: string },
-  config: StateConfigRO
+  config: StateConfigRO,
+  versions: { readonly framework: string; readonly plugin: string }
 ): Record<string, unknown> {
   const translated =
     "resources" in data
@@ -383,8 +398,19 @@ export function toTemplateData(
           style: config.style
         })
       : data
+  /*
+   * 版权行提到**顶层**
+   *
+   * `templates/layout/default.html` 读的是 `{{@copyright}}`，而它是被
+   * `{{extend defaultLayout}}` 展开到两张图共用的那一层 —— 故这个键必须在顶层。
+   * 采集侧把它挂在 `system.copyright` 上（那是"系统信息板块的内容"这个语境下合理的
+   * 归属），于是模板这一侧读到的是 undefined、图上印出字面量 `undefined`。
+   *
+   * 两张图都要有：监控图上根本没有 `system` 这个字段，只有顶层这一条路给它。
+   */
   return {
     ...translated,
+    copyright: "resources" in data ? data.system.copyright : copyrightLine(versions.framework, versions.plugin),
     defaultLayout: join(ctx.root, "templates", LAYOUT_FILE),
     // 模板里的 `{{sys.scale}}` 是拼进 `<body>` 的属性。它就是 `style="transform:scale(1)"`，
     // 而缩放由渲染器的 `viewport.scale` 负责 —— 故这里给空串，让那个属性不出现
@@ -430,5 +456,16 @@ export function plainSummary(view: StateView): string {
   lines.push(`插件 ${view.system.pluginCount} 个 · 命令 ${view.system.commandCount} 条`)
   return lines.join("\n")
 }
+
+/**
+ * 本插件的版本，从自己的 `package.json` 读
+ *
+ * 用 `createRequire` 而不是 `import ... with { type: "json" }`：后者要求 import 断言，
+ * 而本插件是 `NodeNext` 下编译的 ESM，加断言会让 `tsc` 的 target 与 Node 的最低版本
+ * 要求一起往上走，为一个版本号不值得。
+ */
+export const PLUGIN_VERSION: string = (
+  createRequire(import.meta.url)("../package.json") as { version: string }
+).version
 
 export type { Logger }

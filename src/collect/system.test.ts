@@ -62,32 +62,40 @@ describe("osLabel", () => {
 })
 
 describe("copyrightLine", () => {
-  it("含框架名与版本号", () => {
-    const out = copyrightLine("0.4.1")
+  it("本插件名在前、版本号跟着，框架名在后", () => {
+    const out = copyrightLine("0.5.1", "0.1.0")
+    expect(out).toContain("LYLN - State")
+    expect(out).toContain("v0.1.0")
     expect(out).toContain("Yunzai-NG")
-    expect(out).toContain("0.4.1")
+    expect(out).toContain("0.5.1")
+    // 顺序有意义：这是"这张图是谁出的"，使用者先找的是插件自己
+    expect(out.indexOf("LYLN - State")).toBeLessThan(out.indexOf("Yunzai-NG"))
   })
 
-  it("含本插件名 —— 一张图上有出处可查才说得清是哪来的", () => {
-    expect(copyrightLine("0.4.1")).toContain("yenai-state")
+  it("两个版本号各就各位 —— 张冠李戴是最难发现的那种错", () => {
+    const out = copyrightLine("9.9.9", "1.2.3")
+    expect(out).toContain("v1.2.3")
+    expect(out).toContain("9.9.9")
+    // 插件版本不该带在框架名那一段里，反之亦然
+    expect(out).toContain("</span> v1.2.3")
+    expect(out).toContain("</span> 9.9.9")
   })
 
   it("是 HTML（模板里用 `{{@...}}` 不转义输出）", () => {
-    expect(copyrightLine("0.4.1")).toContain("<span")
+    expect(copyrightLine("0.5.1", "0.1.0")).toContain("<span")
   })
 
   it("只含本插件自己的常量，不含任何外部输入", () => {
     // 这一处进的是不转义输出，故它不该有机会带上使用者可控的文本
-    const out = copyrightLine("0.4.1")
+    const out = copyrightLine("0.5.1", "0.1.0")
     expect(out).not.toContain("<script")
-    // 版本号原样进输出（不带标签）—— 调用方给的是 `ctx.app.version`，不是使用者的输入
-    expect(out).toContain("0.4.1")
-    expect(out).toContain("</span> 0.4.1 ")
   })
 
-  it("版本号为空的字符串也给一条合法的行，不出现 `undefined`", () => {
-    const out = copyrightLine("")
+  it("版本号为空串时也给一条合法的行，不出现 `undefined`", () => {
+    // 图最下面那行印出字面量 `undefined` 正是这个缺陷报上来的样子
+    const out = copyrightLine("", "")
     expect(out).not.toContain("undefined")
+    expect(out).toContain("LYLN - State")
     expect(out).toContain("Yunzai-NG")
   })
 })
@@ -104,7 +112,7 @@ describe("`si` 返回 null 的那条路", () => {
   it("CPU 取不到时给空串，不拼出 `null undefined`", async () => {
     // 这条走的是真 `collectSystem`：`si.cpu()` 在这台机器上取得到，故只断言
     // "结果里不该出现 null/undefined 字样" —— 那正是拼接漏判时会留下的痕迹
-    const view = await collectSystem({ version: "0.4.1", pluginCount: 1, commandCount: 2 })
+    const view = await collectSystem({ version: "0.4.1", pluginVersion: "0.1.0", pluginCount: 1, commandCount: 2 })
     expect(view.cpu).not.toContain("null")
     expect(view.cpu).not.toContain("undefined")
     // 型号本身要么是空串（取不到），要么是厂商 + 型号
@@ -112,13 +120,13 @@ describe("`si` 返回 null 的那条路", () => {
   })
 
   it("系统运行时长取不到时给 `00:00:00` 而不是 NaN 串", async () => {
-    const view = await collectSystem({ version: "0.4.1", pluginCount: 1, commandCount: 2 })
+    const view = await collectSystem({ version: "0.4.1", pluginVersion: "0.1.0", pluginCount: 1, commandCount: 2 })
     expect(view.uptime).not.toContain("NaN")
     expect(view.uptime).not.toContain("undefined")
   })
 
   it("时区总有值 —— `Intl` 兜底，不依赖 `si`", async () => {
-    const view = await collectSystem({ version: "0.4.1", pluginCount: 1, commandCount: 2 })
+    const view = await collectSystem({ version: "0.4.1", pluginVersion: "0.1.0", pluginCount: 1, commandCount: 2 })
     expect(view.timezone.length).toBeGreaterThan(0)
   })
 })

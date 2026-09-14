@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest"
 import { sep } from "node:path"
 import { CONFIG_SCHEMA } from "./config.js"
 import { avatarOf, toTemplateData } from "./index.js"
+import { copyrightLine } from "./collect/system.js"
 import type { BotApi } from "@yunzai-ng/types"
 import type { StateView } from "./view/build.js"
 
@@ -78,7 +79,7 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
       commandCount: 40,
       adapterCount: 2,
       nodeVersion: "v22.0.0",
-      copyright: "<span>x</span>"
+      copyright: copyrightLine(VERSIONS.framework, VERSIONS.plugin)
     },
     resources: [],
     disks: [],
@@ -99,9 +100,12 @@ function makeState(overrides: Partial<StateView> = {}): StateView {
 /** 测试用的插件上下文；`toTemplateData` 只从里面读 `root` */
 const ctx = { root: "D:/plugin" }
 
+/** 两个版本号；版权行要用 */
+const VERSIONS = { framework: "0.5.1", plugin: "0.1.0" }
+
 describe("toTemplateData", () => {
   it("`Config` 给全了前端脚本会解构的每一项 —— 少一项脚本就整段不执行", () => {
-    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
+    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
     const cfg = JSON.parse(out["Config"] as string) as Record<string, Record<string, unknown>>
 
     for (const [section, keys] of Object.entries(SCRIPT_READS)) {
@@ -115,7 +119,7 @@ describe("toTemplateData", () => {
   it("解构出来的每一项都不是 undefined —— 解构成功但值是 undefined 同样会炸", () => {
     // `const { color } = { color: undefined }` 不抛错，但在 `echarts.init(..., color)` 处坏掉；
     // 而 `BotNameColor.match(...)` 会当场抛。故值本身也要断言
-    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
+    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
     const cfg = JSON.parse(out["Config"] as string) as Record<string, Record<string, unknown>>
 
     expect(cfg["chartsCfg"]?.["color"]).toBeDefined()
@@ -128,7 +132,7 @@ describe("toTemplateData", () => {
   it("配色来自使用者的配置，不是写死的缺省值", () => {
     // 曲线配色在面板上可改；写死会让改配置没反应，而「没反应」最难被察觉
     const config = { ...CONFIG_SCHEMA.defaults(), chartsCfg: { ...CONFIG_SCHEMA.defaults().chartsCfg, color: ["#111111", "#222222"] } }
-    const out = toTemplateData(makeState(), ctx, config)
+    const out = toTemplateData(makeState(), ctx, config, VERSIONS)
     const cfg = JSON.parse(out["Config"] as string) as Record<string, { color: string[] }>
 
     expect(cfg["chartsCfg"]?.color).toEqual(["#111111", "#222222"])
@@ -137,7 +141,7 @@ describe("toTemplateData", () => {
   it("`style` 里的配色同样来自配置", () => {
     const base = CONFIG_SCHEMA.defaults()
     const config = { ...base, style: { ...base.style, BotNameColor: "gradient:1deg,#a,#b" } }
-    const out = toTemplateData(makeState(), ctx, config)
+    const out = toTemplateData(makeState(), ctx, config, VERSIONS)
     const cfg = JSON.parse(out["Config"] as string) as Record<string, { BotNameColor: string }>
 
     expect(cfg["style"]?.BotNameColor).toBe("gradient:1deg,#a,#b")
@@ -145,20 +149,20 @@ describe("toTemplateData", () => {
 
   it("状态图带上翻译过的模板变量，监控图不带", () => {
     // `toTemplateData` 靠 `resources` 这个字段分辨两者：监控图上没有资源环
-    const state = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
+    const state = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
     expect(state).toHaveProperty("visualData")
     expect(state).toHaveProperty("BotStatusList")
   })
 
   it("`defaultLayout` 是插件目录下的绝对路径", () => {
     // 模板第一行 `{{extend defaultLayout}}`，而新内核刻意不注入它（见 index.ts 的注释）
-    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
+    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
     expect(out["defaultLayout"]).toBe(`D:${sep}plugin${sep}templates${sep}layout${sep}default.html`)
   })
 
   it("`sys.scale` 是空串 —— 缩放由渲染器的 viewport 负责", () => {
     // 给数字会让模板输出一个多余的 `transform:scale()`，与 viewport.scale 叠成双重缩放
-    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults())
+    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
     expect((out["sys"] as { scale: string }).scale).toBe("")
   })
 })
@@ -225,5 +229,49 @@ describe("avatarOf", () => {
 
   it("QQ 号里的前导零原样保留 —— `Number()` 会把它吃掉", async () => {
     expect(await avatarOf(bot(), "0123")).toMatch(/nk=0123$/)
+  })
+})
+
+/**
+ * 版权行要落在**顶层**
+ *
+ * `templates/layout/default.html` 里写的是 `{{@copyright}}`，而 layout 是被
+ * `{{extend defaultLayout}}` 展开到两张图共用的那一层 —— 故这个键必须在渲染数据的顶层。
+ * 采集侧把它挂在 `system.copyright` 上（在"系统信息板块的内容"这个语境下说得通），
+ * 于是模板那侧读到 undefined、图上印出字面量 `undefined`（实机上报上来的就是这个）。
+ *
+ * 这条断言的是"位置"而不是"内容"：一个只断言 `system.copyright` 有值的测试在缺陷存在时
+ * 照样通过 —— 因为值一直在，只是放错了层。
+ */
+describe("版权行的位置", () => {
+  it("状态图：顶层有 `copyright`", () => {
+    const out = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
+    expect(typeof out["copyright"]).toBe("string")
+    expect(out["copyright"]).toContain("LYLN - State")
+  })
+
+  it("监控图：顶层也有 —— 它压根没有 `system` 这个字段", () => {
+    // 监控图走的是 `"resources" in data` 的另一支。少了这一句，监控图最下面
+    // 就是一行 `undefined`
+    const monitor = { chartData: "{}", interval: "每 1 分钟", maxPoints: 60 }
+    const out = toTemplateData(monitor as never, ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
+    expect(typeof out["copyright"]).toBe("string")
+    expect(out["copyright"]).toContain("LYLN - State")
+    expect(out["copyright"]).not.toContain("undefined")
+  })
+
+  it("两张图的版权行是同一句话，且都带上了两个版本号", () => {
+    // 改了一张忘了另一张不会有人发现 —— 故这里把两张的取出来对一遍
+    const state = toTemplateData(makeState(), ctx, CONFIG_SCHEMA.defaults(), VERSIONS)
+    const monitor = toTemplateData(
+      { chartData: "{}", interval: "每 1 分钟", maxPoints: 60 } as never,
+      ctx,
+      CONFIG_SCHEMA.defaults(),
+      VERSIONS
+    )
+    for (const out of [state, monitor]) {
+      expect(out["copyright"]).toContain("v0.1.0")
+      expect(out["copyright"]).toContain("0.5.1")
+    }
   })
 })

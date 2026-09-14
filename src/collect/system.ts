@@ -69,6 +69,8 @@ export interface SystemView {
 export interface SystemInput {
   /** 框架版本 */
   readonly version: string
+  /** 本插件的版本 */
+  readonly pluginVersion: string
   /** 插件数 */
   readonly pluginCount: number
   /** 命令数 */
@@ -82,12 +84,13 @@ export interface SystemInput {
  *
  * 输出的是 HTML（模板里那处用的是 `{{@...}}`），故只放本插件自己的常量，不含使用者输入。
  * @param version 框架版本
+ * @param pluginVersion 本插件的版本
  * @returns HTML 片段
  */
-export function copyrightLine(version: string): string {
+export function copyrightLine(version: string, pluginVersion: string): string {
   return (
-    `Powered by <span style='color:#0077ff'>Yunzai-NG</span> ${version} · ` +
-    `<span style='color:#0077ff'>yenai-state</span>`
+    `<span style='color:#0077ff'>LYLN - State</span> v${pluginVersion} · ` +
+    `<span style='color:#0077ff'>Yunzai-NG</span> ${version}`
   )
 }
 
@@ -159,6 +162,6 @@ export async function collectSystem(input: SystemInput): Promise<SystemView> {
     // 而内核尚未完成加载时是 undefined —— 后者不该显示成「0 个适配器」
     ...(input.adapterCount === undefined ? {} : { adapterCount: input.adapterCount }),
     nodeVersion: `v${platform.nodeVersion}`,
-    copyright: copyrightLine(input.version)
+    copyright: copyrightLine(input.version, input.pluginVersion)
   }
 }
