@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest"
 import { CONFIG_SCHEMA, RESOURCE_ITEMS, showFastFetchFor, showFor } from "./config.js"
+import { parseSiteLine } from "./collect/network.js"
 
 describe("showFor", () => {
   it("`true` 在任何情况下都显示", () => {
@@ -171,10 +172,18 @@ describe("CONFIG_SCHEMA", () => {
   })
 
   it("缺省配置里没有 URL 为空的白名单项之类会让采集侧崩掉的空值", () => {
+    /*
+     * 「测试的网址」这一项跨了两层：config 给出的是文本行，network 的 `parseSiteLine`
+     * 才把它翻成网址。故此处不能只看默认值非空，而要**整条链路走通**：
+     * 默认值必须是解析器认得的写法，否则开箱即用时那张表就是空的。
+     *
+     * 这样断言也把两处绑在了一起 —— 默认值改成一种解析器不认的格式，这里就红。
+     */
     const cfg = CONFIG_SCHEMA.defaults()
-    for (const site of cfg.psTestSites.list) {
-      expect(site.url).not.toBe("")
-      expect(site.name).not.toBe("")
+    for (const line of cfg.psTestSites.list) {
+      const site = parseSiteLine(line, 0, () => undefined)
+      expect(site?.url).not.toBe("")
+      expect(site?.name).not.toBe("")
     }
   })
 })

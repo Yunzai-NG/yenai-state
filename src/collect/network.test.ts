@@ -9,7 +9,8 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { delayColor, errorReason, escapeHtml, statusColor, toNetworkView } from "./network.js"
+import type { HttpClient } from "@yunzai-ng/types"
+import { delayColor, errorReason, escapeHtml, parseSiteLine, probeSites, statusColor, toNetworkView } from "./network.js"
 
 describe("toNetworkView", () => {
   it("速率与累计量都齐时都给", () => {
@@ -180,5 +181,167 @@ describe("escapeHtml", () => {
 
   it("空串给空串", () => {
     expect(escapeHtml("")).toBe("")
+  })
+})
+
+describe("网站测试的解析", () => {
+  /** 收集告警，供下面断言"告了几条、说了什么" */
+  const collector = (): { readonly list: string[]; readonly onWarn: (m: string) => void } => {
+    const list: string[] = []
+    return { list, onWarn: (m: string) => list.push(m) }
+  }
+
+  it("三段齐全时各归各位", () => {
+    const { list, onWarn } = collector()
+    expect(parseSiteLine("Google | https://google.com | 1", 0, onWarn)).toEqual({
+      name: "Google",
+      url: "https://google.com",
+      useProxy: true
+    })
+    expect(list).toEqual([])
+  })
+
+  it("多余的空白不影响解析", () => {
+    expect(parseSiteLine("  百度   |   https://baidu.com   |  0  ", 0, () => undefined)).toEqual({
+      name: "百度",
+      url: "https://baidu.com",
+      useProxy: false
+    })
+  })
+
+  it("只有网址时，网址当名字", () => {
+    expect(parseSiteLine("https://baidu.com", 0, () => undefined)).toEqual({
+      name: "https://baidu.com",
+      url: "https://baidu.com",
+      useProxy: false
+    })
+  })
+
+  it("名称留空时也用网址兜底 —— 表格那一列不该是一格空白", () => {
+    expect(parseSiteLine("| https://baidu.com | 1", 0, () => undefined)).toEqual({
+      name: "https://baidu.com",
+      url: "https://baidu.com",
+      useProxy: true
+    })
+  })
+
+  it("**全角竖线一并接受** —— 中文输入法下最容易打错的就是它，而它与半角长得一样", () => {
+    const { list, onWarn } = collector()
+    expect(parseSiteLine("Google｜https://google.com｜1", 0, onWarn)).toEqual({
+      name: "Google",
+      url: "https://google.com",
+      useProxy: true
+    })
+    // 不归一化的话这一项会因"不是 http 开头"被跳过，使用者只会看到"我配的那项没了"
+    expect(list).toEqual([])
+  })
+
+  it("全角与半角混用也认", () => {
+    expect(parseSiteLine("Google｜https://google.com|1", 0, () => undefined)?.useProxy).toBe(true)
+  })
+
+  it("走代理的几种真值写法", () => {
+    const on = ["1", "true", "TRUE", "yes", "Yes", "是"]
+    for (const text of on) {
+      expect(parseSiteLine(`A | https://a.com | ${text}`, 0, () => undefined)?.useProxy).toBe(true)
+    }
+  })
+
+  it("其余一律为假，且**不告警** —— 与「没写」等价，而默认就是不代理", () => {
+    const off = ["0", "false", "no", "否", "", "随便写的", "2"]
+    for (const text of off) {
+      const { list, onWarn } = collector()
+      expect(parseSiteLine(`A | https://a.com | ${text}`, 0, onWarn)?.useProxy).toBe(false)
+      expect(list).toEqual([])
+    }
+  })
+
+  it("不写第三段时为假", () => {
+    expect(parseSiteLine("A | https://a.com", 0, () => undefined)?.useProxy).toBe(false)
+    expect(parseSiteLine("A | https://a.com |", 0, () => undefined)?.useProxy).toBe(false)
+  })
+
+  it("**网址不是 http(s):// 时跳过该项并告警一次**，而不是让整次测试失败", () => {
+    const { list, onWarn } = collector()
+    expect(parseSiteLine("A | ftp://a.com | 1", 0, onWarn)).toBeUndefined()
+    expect(list).toHaveLength(1)
+    // 告警里要带上行号与人写的那一行，否则十项里哪一项写错了无从得知
+    expect(list[0]).toContain("第 1 项")
+    expect(list[0]).toContain("ftp://a.com")
+  })
+
+  it("行号从 0 起，告警里报的是人看到的那一号", () => {
+    const { list, onWarn } = collector()
+    parseSiteLine("A | 不是网址", 4, onWarn)
+    expect(list[0]).toContain("第 5 项")
+  })
+
+  it("大小写不敏感地接受 HTTPS://", () => {
+    expect(parseSiteLine("A | HTTPS://a.com", 0, () => undefined)?.url).toBe("HTTPS://a.com")
+  })
+
+  it("多打了竖线时取前两段，不报错 —— 网址不含竖线，多出来的段只能来自手误", () => {
+    const { list, onWarn } = collector()
+    expect(parseSiteLine("A | https://a.com | 1 | 多打的", 0, onWarn)).toEqual({
+      name: "A",
+      url: "https://a.com",
+      useProxy: true
+    })
+    expect(list).toEqual([])
+  })
+
+  it("空行返回 undefined 且**不告警** —— 药丸输入框允许存在空项，那不是错误", () => {
+    const { list, onWarn } = collector()
+    expect(parseSiteLine("", 0, onWarn)).toBeUndefined()
+    expect(parseSiteLine("   ", 0, onWarn)).toBeUndefined()
+    expect(parseSiteLine("|", 0, onWarn)).toBeUndefined()
+    expect(parseSiteLine(" | | ", 0, onWarn)).toBeUndefined()
+    expect(list).toEqual([])
+  })
+
+  it("空行与写错的行必须区分开：前者无声，后者有声", () => {
+    // 这一条盯着的是上面两条的**差别**：把空行也告警一遍，日志里就全是噪音
+    const empty = collector()
+    parseSiteLine("", 0, empty.onWarn)
+    const bad = collector()
+    parseSiteLine("不是网址", 0, bad.onWarn)
+    expect(empty.list).toEqual([])
+    expect(bad.list).toHaveLength(1)
+  })
+})
+
+describe("probeSites 的名字转义", () => {
+  /**
+   * 一个只回状态码的假客户端
+   *
+   * 这里破例给 `probeSites` 造替身：要守的不是"请求发得对不对"（那要真联网），而是
+   * **名字有没有转义**。名字取自使用者可在面板上编辑的文本，而模板里那一格不转义。
+   */
+  const fakeHttp = (): HttpClient =>
+    ({
+      /**
+       * 装成一次成功的请求
+       * @returns 固定状态码
+       */
+      request: async () => ({ status: 200 })
+    }) as unknown as HttpClient
+
+  it("**名字里的 HTML 被转义** —— 面板上可编辑之后它就成了注入点", async () => {
+    const rows = await probeSites(
+      fakeHttp(),
+      [{ name: `"><script>alert(1)</script>`, url: "https://a.com" }],
+      1,
+      1000,
+      () => undefined
+    )
+    expect(rows[0]?.name).not.toContain("<")
+    expect(rows[0]?.name).not.toContain(">")
+    expect(rows[0]?.name).not.toContain('"')
+    expect(rows[0]?.name).toContain("&lt;script&gt;")
+  })
+
+  it("中文与普通名字原样保留", async () => {
+    const rows = await probeSites(fakeHttp(), [{ name: "百度", url: "https://a.com" }], 1, 1000, () => undefined)
+    expect(rows[0]?.name).toBe("百度")
   })
 })

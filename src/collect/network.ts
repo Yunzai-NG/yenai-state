@@ -168,6 +168,79 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * 一条网站测试配置解析出来的形状，与 `probeSites` 的入参一致
+ *
+ * 三个字段都是必需的：解析器负责把"没写"填成"该有的默认"，下游才不必到处写 `?? false`。
+ */
+export interface SiteSpec {
+  /** 显示名；留空时用网址兜底 */
+  readonly name: string
+  /** 要访问的完整 URL */
+  readonly url: string
+  /** 是否走框架的全局代理 */
+  readonly useProxy: boolean
+}
+
+/** 判为"走代理"的写法 */
+const TRUTHY = new Set(["1", "true", "yes", "是"])
+
+/** 合法网址的前缀 */
+const URL_PREFIX = /^https?:\/\//i
+
+/**
+ * 把配置里的一行文本解析成一条测试项
+ *
+ * 一行写成 `名称 | 网址 | 走代理`。**宽松解析、解释性告警**：面板上药丸里打字比点选容易写错，
+ * 因此只在"这一项无论如何都用不了"时告警并跳过（见下），其余一律设法解释出一个可用的结果。
+ *
+ * 几条规则各自的理由：
+ *
+ * - **全角竖线一并接受。** 中文输入法下打出 `｜` 是最常见的一种写错，而它与半角长得几乎
+ *   一样，不归一化的话使用者只会看到"我配的这一项不见了"，找不到原因。
+ * - **只按前两个分隔符切。** 未转义的 `|` 在 URL 里非法，故网址本身不含分隔符，不需要转义
+ *   机制；但反过来说，多切出来的段只能来自多打的竖线，此时把**前两段**当名称与网址
+ *   （多出来的段并入代理那一段只会让代理判定失败，而它本来也有默认值）比报错删项有用得多。
+ * - **名称留空时用网址兜底。** 表格那一列本该写着"这是哪个站"，空着一格等于没写。
+ * - **代理写法认不出时不告警** —— 与"没写"等价，而默认就是不代理。
+ * - **网址不是 http(s):// 时告警并跳过这一项，而不是让整次测试失败。** 一个写错的项不该
+ *   连累另外九项也测不成，与本目录其他采集"取不到就不显示"的取舍一致。
+ * - **整行空白返回 undefined 且不告警**：药丸输入框允许存在空项，那不是错误。
+ *
+ * `name` 由调用方转义后再输出（模板里那一格不转义，见 `probeOne`）。
+ * @param line 配置里的一行
+ * @param index 行号，从 0 起，仅用于兜底名字
+ * @param onWarn 解析不了时的告知方式
+ * @returns 解析结果；整行用不了时 undefined
+ */
+export function parseSiteLine(
+  line: string,
+  index: number,
+  onWarn: (message: string) => void
+): SiteSpec | undefined {
+  const parts = line.replace(/｜/g, "|").split("|")
+  const [first = "", second, ...rest] = parts.map(part => part.trim())
+
+  /*
+   * 只有一段时，这一段就是网址
+   *
+   * 与"名称留空"合起来看：两种写法解析出的结果相同，故下面统一按 `second` 是否给出来分。
+   */
+  const url = second === undefined ? first : second
+  if (url === "") return undefined
+
+  if (!URL_PREFIX.test(url)) {
+    onWarn(`第 ${index + 1} 项「${line.trim()}」不是 http:// 或 https:// 开头的网址，已跳过`)
+    return undefined
+  }
+
+  // 名称取第一段；未给或留空（`| https://x.com`）时用网址兜底
+  const name = (second === undefined ? "" : first) === "" ? url : first
+  // 多余的段一律不看：那只能是多打的竖线，而网址已经取到了
+  const proxy = rest.length > 0 ? (rest[0] ?? "") : ""
+  return { name, url, useProxy: TRUTHY.has(proxy.toLowerCase()) }
+}
+
+/**
  * 测一个网址的延迟
  *
  * 用 `HEAD` 而非 `GET`：这里只关心「通不通、多快」，不需要任何响应体。某些站点不支持 HEAD
@@ -262,10 +335,17 @@ async function probeOne(
   timeoutMs: number,
   onWarn: (message: string, err: unknown) => void
 ): Promise<SiteResult> {
+  /*
+   * `name` 要转义
+   *
+   * 模板里那一格是 `{{$value.name}}`，**不转义**。这个名字原本只是 yaml 里的常量，
+   * 自从「测试的网址」可以在面板上编辑之后它就是使用者可控的文本了，不转义即为注入点。
+   */
+  const name = escapeHtml(site.name)
   try {
     const { status, delay } = await probeSite(http, site.url, timeoutMs, site.useProxy ?? false)
     return {
-      name: site.name,
+      name,
       status: colored(statusColor(status), String(status)),
       delay: colored(delayColor(delay), `${delay}ms`)
     }
@@ -275,7 +355,7 @@ async function probeOne(
     const reason = errorReason(err)
     onWarn(`测试 ${site.name} 失败`, err)
     return {
-      name: site.name,
+      name,
       status: colored(COLOR_BAD, "-"),
       delay: colored(COLOR_BAD, escapeHtml(reason))
     }

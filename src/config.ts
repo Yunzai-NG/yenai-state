@@ -8,6 +8,11 @@
  *          `true | false | pro` 三态语义，而不是被"改良"成布尔 —— 三态里 `pro` 与 `true` 的区别
  *          是使用者实际依赖的（"只在状态pro里显示"）。
  *
+ *          **唯一的例外是 `psTestSites.list`。** 源插件那里是 `[{ name, url, useProxy }]` 的
+ *          对象数组，此处是「一行一项」的字符串数组 —— 面板渲染不了对象数组（一渲染就是
+ *          `[object Object]`，且写回时会把字段毁成字符串数组），详见该字段自己的注释。
+ *          读到文件头这句"逐一对齐"时，别以为 `list` 是抄漏了。
+ *
  *          **三态一律用 `s.select(...)` 而不是 `s.enum(...)`。** enum 在面板上渲染为一个下拉，
  *          每项只有取值本身；select 允许给每项配 label 与 description，于是"pro 是什么意思"
  *          写在选项上，而不必让使用者去翻文档 —— 一个 `pro` 字样的下拉项没有说明是无法猜的。
@@ -120,23 +125,27 @@ export const CONFIG_SCHEMA = s.object({
         .default("pro")
         .title("显示网站测试")
         .desc("逐条请求下列网址并报告状态码与延迟"),
+      /*
+       * 一项一行文本，而不是源插件那样的对象数组
+       *
+       * 源插件这里是 `[{ name, url, useProxy }]`。改成字符串是**被迫的**：面板的字段组件
+       * 把一切数组都渲染成药丸输入框，而药丸会把每一项 `String()` 一遍 —— 元素是对象时
+       * 那就是一片 `[object Object]`；更糟的是它写回的是字符串化过的数组，使用者在面板上
+       * 点一下「＋ 添加」，整个字段就从对象数组变成字符串数组，采集侧此后读到的 `url`
+       * 一律是 `undefined`。面板没有对象数组控件（可用控件见内核的 `SchemaWidget`），
+       * 故只能改用面板已经支持的一种形态，由本插件自己解析。
+       *
+       * 这是本插件与源插件**唯一**对不上的字段，解析见 `collect/network.ts` 的 `parseSiteLine`。
+       */
       list: s
-        .array(
-          s.object({
-            name: s.string().default("").title("名称").desc("表格里显示的名字"),
-            url: s.string().default("").title("网址").desc("要访问的完整 URL"),
-            useProxy: s
-              .boolean()
-              .default(false)
-              .title("走代理")
-              .desc("使用框架的全局代理访问。境外站点通常需要打开")
-          })
-        )
-        .default([
-          { name: "Baidu", url: "https://baidu.com", useProxy: false },
-          { name: "Google", url: "https://google.com", useProxy: true }
-        ])
-        .title("测试的网址"),
+        .array(s.string())
+        .default(["Baidu | https://baidu.com | 0", "Google | https://google.com | 1"])
+        .title("测试的网址")
+        .desc(
+          "一项一行，用竖线隔开三段：「名称 | 网址 | 走代理」。" +
+            "名称可以留空，那就用网址当名字。走代理写 1 表示走框架的全局代理（境外站点通常需要），" +
+            "写 0 或不写则直连。例：Google | https://google.com | 1"
+        ),
       timeout: s
         .duration()
         .default("5s")

@@ -27,7 +27,7 @@ import { collectResources } from "../collect/resources.js"
 import type { ResourceRing, ResourceKind } from "../collect/resources.js"
 import { collectDisks, toDiskIo } from "../collect/disk.js"
 import type { DiskView, DiskIoView } from "../collect/disk.js"
-import { toNetworkView, probeSites } from "../collect/network.js"
+import { toNetworkView, probeSites, parseSiteLine } from "../collect/network.js"
 import type { NetworkView, SiteResult } from "../collect/network.js"
 import { collectProcesses } from "../collect/process.js"
 import type { ProcessView } from "../collect/process.js"
@@ -240,7 +240,12 @@ export async function buildState(input: BuildInput): Promise<StateView> {
     wantSites
       ? probeSites(
           input.http,
-          config.psTestSites.list,
+          // 配置里是「名称 | 网址 | 走代理」的行，先解析成 probeSites 要的形状；
+          // 解析不了的行在此丢弃并各自告警一条（见 parseSiteLine）
+          config.psTestSites.list.flatMap((line, i) => {
+            const site = parseSiteLine(line, i, message => warn("sites")(message, new Error(message)))
+            return site === undefined ? [] : [site]
+          }),
           config.psTestSites.concurNum,
           timeout,
           warn("sites")
