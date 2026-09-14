@@ -204,7 +204,8 @@ export function toOtherInfo(view: StateView): StateTemplateData["otherInfo"] {
     osInfo: { main: system.os, ...(system.kernel === "" ? {} : { secondary: `内核 ${system.kernel}` }) },
     hostname: { main: system.hostname },
     // 系统运行时长是主角，本进程的运行时长放次行 —— 排查时两者都要看，但先看前者
-    sysTime: { main: system.uptime, secondary: `Bot 已运行 ${view.bot.uptime}` },
+    // "Bot 已运行"取的是**本进程**的运行时长，各账号共用一份，故取第一张卡即可
+    sysTime: { main: system.uptime, secondary: `Bot 已运行 ${view.bots[0]?.uptime ?? "00:00:00"}` },
     pluginNum: {
       main: `${String(system.pluginCount)} 个`,
       secondary: `${String(system.commandCount)} 条命令 · ${String(system.adapterCount ?? 0)} 个适配器`
@@ -215,33 +216,34 @@ export function toOtherInfo(view: StateView): StateTemplateData["otherInfo"] {
 /**
  * 拼账号卡片
  *
- * **只做一张卡，不做 `BotStatusList` 那个"多账号列表"。** 源插件会为每个 Bot 各出一张卡，
- * 但新内核的多账号是「同一个机器人用不同协议接了两份账号配置」，画成两张几乎一样的卡
- * 只会让人以为是两套系统。当前命令只画使用者说话的那个号。
+ * **一个号一张卡**（源插件的形制）。模板里 `{{each BotStatusList}}` 本就只包住卡片本身，
+ * 资源环、磁盘、网速、进程表那些**整机共享**的数据在循环之外 —— 故多张卡不会把这些
+ * 重复画 N 遍。
+ *
+ * 顺序即采集时的顺序（说话的那个号在最前，见 `index.ts` 的 `pickAccounts`）。
  * @param view 采集结果
- * @returns 卡片数组（当前恒为一项）
+ * @returns 卡片数组；一个账号都没有时为空数组
  */
 export function toBotCards(view: StateView): BotCard[] {
-  const { bot } = view
-  /** 联系人计数；取不到的那几项直接不放，模板里 `{{if v}}` 会跳过 */
-  const contacts: Record<string, string> = {}
-  if (bot.friendCount !== undefined) contacts["好友"] = String(bot.friendCount)
-  if (bot.groupCount !== undefined) contacts["群"] = String(bot.groupCount)
+  return view.bots.map(bot => {
+    /** 联系人计数；取不到的那几项直接不放，模板里 `{{if v}}` 会跳过 */
+    const contacts: Record<string, string> = {}
+    if (bot.friendCount !== undefined) contacts["好友"] = String(bot.friendCount)
+    if (bot.groupCount !== undefined) contacts["群"] = String(bot.groupCount)
 
-  return [
-    {
+    return {
       nickname: bot.nickname,
       ...(bot.avatar === "" ? {} : { avatar: { path: bot.avatar } }),
       // 按状态原文取图标，不是按中文文案 —— 见 statusIcon 的注释
       status: statusIcon(bot.statusKey),
       botVersion: `v${view.system.version}`,
       // 该账号实际用的那一个适配器；取不到时整项不放，模板里 `{{if $value.platform}}` 会跳过
-      ...(view.bot.adapterName === "" ? {} : { platform: view.bot.adapterName }),
+      ...(bot.adapterName === "" ? {} : { platform: bot.adapterName }),
       botRunTime: bot.uptime,
       countContacts: contacts,
       messageCount: {}
     }
-  ]
+  })
 }
 
 /**

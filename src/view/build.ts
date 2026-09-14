@@ -45,8 +45,8 @@ export interface StateView {
   readonly time: string
   /** 背景图的 CSS 值；取不到时不出现，模板回落到 CSS 里的底色 */
   readonly backdrop?: string
-  /** 账号板块 */
-  readonly bot: BotView
+  /** 各账号板块；按内核给出的账号顺序，一个号一张卡 */
+  readonly bots: readonly BotView[]
   /** 各适配器 */
   readonly adapters: readonly AdapterView[]
   /** 系统板块 */
@@ -113,24 +113,33 @@ export interface BuildInput {
     readonly retries: number
     readonly nickname?: string
   }[]
-  /** 被选中的账号的 selfId */
-  readonly selfId: string
-  /** 被选中账号所属的适配器 id，用于查出它叫什么 */
-  readonly adapterId: string
-  /** 被选中账号的昵称 */
-  readonly nickname: string
-  /** 被选中账号的状态 */
-  readonly status: string
-  /** 进入当前状态的时间戳 */
-  readonly since: number
-  /** 已重连次数 */
-  readonly retries: number
-  /** 头像地址 */
-  readonly avatarUrl?: string
-  /** 好友数；不取时为 undefined */
-  readonly friendCount?: number
-  /** 群数；不取时为 undefined */
-  readonly groupCount?: number
+  /**
+   * 要画的那几个账号，每个号一张卡
+   *
+   * **顺序即图上的顺序**，由调用方决定（内核给出的账号顺序）。
+   * `avatarUrl` / `friendCount` / `groupCount` 三项是可选的：头像要问适配器、好友与群数
+   * 要发请求，非 pro 时根本不取，故缺了就是"没取"，而不是"取到空"。
+   */
+  readonly bots: readonly {
+    /** 该账号所属的适配器 id，用于查出它叫什么 */
+    readonly adapterId: string
+    /** 账号昵称；内核未取到时为空串 */
+    readonly nickname: string
+    /** 平台账号 id */
+    readonly selfId: string
+    /** 账号状态，取自 `AccountState.status` */
+    readonly status: string
+    /** 进入当前状态的时间戳 */
+    readonly since: number
+    /** 已重连次数 */
+    readonly retries: number
+    /** 头像地址；未取到时不出现 */
+    readonly avatarUrl?: string
+    /** 好友数；不取或取不到时不出现 */
+    readonly friendCount?: number
+    /** 群数；不取或取不到时不出现 */
+    readonly groupCount?: number
+  }[]
   /** 采样器 */
   readonly monitor: Monitor
   /** 内核的 HTTP 客户端 */
@@ -222,7 +231,7 @@ export async function buildState(input: BuildInput): Promise<StateView> {
     network,
     sites,
     process,
-    bot,
+    bots,
     system,
     fastfetch,
     backdrop
@@ -272,29 +281,39 @@ export async function buildState(input: BuildInput): Promise<StateView> {
           return undefined
         })
       : Promise.resolve(undefined),
-    collectBot(
-      {
-        nickname: input.nickname,
-        selfId: input.selfId,
-        status: input.status,
-        since: input.since,
-        retries: input.retries,
-        ...(input.avatarUrl === undefined ? {} : { avatarUrl: input.avatarUrl }),
-        ...(input.friendCount === undefined ? {} : { friendCount: input.friendCount }),
-        ...(input.groupCount === undefined ? {} : { groupCount: input.groupCount }),
-        adapterAccounts: input.accounts.length,
-        adapterOnline: input.accounts.filter(account => account.status === "online").length,
-        // 该账号实际用的那个适配器 —— 不是 `input.adapters` 全体（那是"注册了哪几个"）
-        adapterName: input.adapters.find(adapter => adapter.id === input.adapterId)?.name ?? ""
-      },
-      input.http,
-      input.defaultAvatar,
-      warn("bot")
-    ).catch((err: unknown) => {
-      warn("bot")("采集账号信息失败", err)
-      // 账号板块是这个页面的主角，取不到也要给一个能渲染的空壳
-      return emptyBot(input)
-    }),
+    /*
+     * 一个号一张卡，几个号并发取
+     *
+     * 每个号各自 catch：某个号取不到（头像下载失败、适配器已卸载）不该让别的号也跟着消失 ——
+     * 与本文件"每块失败都只是这块不出现"的约定一致。
+     */
+    Promise.all(
+      input.bots.map(bot =>
+        collectBot(
+          {
+            nickname: bot.nickname,
+            selfId: bot.selfId,
+            status: bot.status,
+            since: bot.since,
+            retries: bot.retries,
+            ...(bot.avatarUrl === undefined ? {} : { avatarUrl: bot.avatarUrl }),
+            ...(bot.friendCount === undefined ? {} : { friendCount: bot.friendCount }),
+            ...(bot.groupCount === undefined ? {} : { groupCount: bot.groupCount }),
+            adapterAccounts: input.accounts.length,
+            adapterOnline: input.accounts.filter(account => account.status === "online").length,
+            // 该账号实际用的那个适配器 —— 不是 `input.adapters` 全体（那是"注册了哪几个"）
+            adapterName: input.adapters.find(adapter => adapter.id === bot.adapterId)?.name ?? ""
+          },
+          input.http,
+          input.defaultAvatar,
+          warn("bot")
+        ).catch((err: unknown) => {
+          warn("bot")(`采集账号 ${bot.selfId} 的信息失败`, err)
+          // 账号卡是这张图的主角之一，取不到也要给一个能渲染的空壳，而不是少一张卡
+          return emptyBot(bot, input)
+        })
+      )
+    ),
     collectSystem({
       version: input.version,
       pluginVersion: input.pluginVersion,
@@ -330,7 +349,7 @@ export async function buildState(input: BuildInput): Promise<StateView> {
   return {
     time: formatDateTime(),
     ...(backdrop === undefined ? {} : { backdrop: backdrop.css }),
-    bot,
+    bots,
     adapters: collectAdapters(input.adapters, input.accounts),
     system: system ?? emptySystem(input),
     resources,
@@ -354,23 +373,27 @@ export async function buildState(input: BuildInput): Promise<StateView> {
 }
 
 /**
- * 账号板块的兜底空壳
- * @param input 全部输入
+ * 账号卡的兜底空壳
+ *
+ * 只兜这一个号 —— 别的号照常渲染。故它按号取参数，而不是拿整份 `BuildInput`：
+ * 后者会让"这张空壳是哪個号的"变得含糊。
+ * @param bot 该账号的输入
+ * @param input 全部输入，只为查适配器名
  * @returns 一个能渲染的最小对象
  */
-function emptyBot(input: BuildInput): BotView {
+function emptyBot(bot: BuildInput["bots"][number], input: BuildInput): BotView {
   return {
-    nickname: input.nickname === "" ? "未知" : input.nickname,
-    uin: input.selfId,
+    nickname: bot.nickname === "" ? "未知" : bot.nickname,
+    uin: bot.selfId,
     // 适配器名与账号数据无关，兜底时照常给得出（账号取不到不是适配器没注册）
-    adapterName: input.adapters.find(adapter => adapter.id === input.adapterId)?.name ?? "",
+    adapterName: input.adapters.find(adapter => adapter.id === bot.adapterId)?.name ?? "",
     avatar: "",
     status: "未知",
     // 原文给空串：`statusIcon` 认不出时会退到最中性的那个图标
     statusKey: "",
     statusColor: "#8a8a8a",
     since: "未知",
-    retries: input.retries,
+    retries: bot.retries,
     memory: "0 B",
     uptime: "00:00:00"
   }

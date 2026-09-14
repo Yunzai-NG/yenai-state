@@ -49,19 +49,21 @@ const SCRIPT_READS = {
 function makeState(overrides: Partial<StateView> = {}): StateView {
   return {
     time: "2026-09-01 12:00:00",
-    bot: {
-      nickname: "测试号",
-      uin: "10001",
-      adapterName: "",
-      avatar: "",
-      status: "在线",
-      statusKey: "online",
-      statusColor: "#2EC272",
-      since: "2026-09-01 10:00:00",
-      retries: 0,
-      memory: "120MB",
-      uptime: "02:00:00"
-    },
+    bots: [
+      {
+        nickname: "测试号",
+        uin: "10001",
+        adapterName: "",
+        avatar: "",
+        status: "在线",
+        statusKey: "online",
+        statusColor: "#2EC272",
+        since: "2026-09-01 10:00:00",
+        retries: 0,
+        memory: "120MB",
+        uptime: "02:00:00"
+      }
+    ],
     adapters: [],
     system: {
       os: "Ubuntu 22.04",

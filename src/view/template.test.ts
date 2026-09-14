@@ -35,19 +35,21 @@ import { statusIcon, toBotCards, toOtherInfo, toTemplate, toTemplateRing } from 
 function makeState(overrides: Partial<StateView> = {}): StateView {
   return {
     time: "2026-09-01 12:00:00",
-    bot: {
-      nickname: "测试号",
-      uin: "10001",
-      avatar: "file:///a.png",
-      status: "在线",
-      statusKey: "online",
-      statusColor: "#2EC272",
-      since: "2026-09-01 10:00:00",
-      retries: 0,
-      adapterName: "",
-      memory: "120MB",
-      uptime: "02:00:00"
-    },
+    bots: [
+      {
+        nickname: "测试号",
+        uin: "10001",
+        avatar: "file:///a.png",
+        status: "在线",
+        statusKey: "online",
+        statusColor: "#2EC272",
+        since: "2026-09-01 10:00:00",
+        retries: 0,
+        adapterName: "",
+        memory: "120MB",
+        uptime: "02:00:00"
+      }
+    ],
     adapters: [],
     system: {
       os: "Ubuntu 22.04",
@@ -194,24 +196,47 @@ describe("statusIcon", () => {
 })
 
 describe("toBotCards", () => {
-  it("只出一张卡", () => {
+  it("一个号一张卡", () => {
     expect(toBotCards(makeState())).toHaveLength(1)
   })
 
+  it("**有几个号就出几张卡，顺序原样** —— 只画一个号是这条命令曾经的样子", () => {
+    /*
+     * 这一条守的是「列出所有账号」这件事本身。曾经的实现是 `pickAccount`（单数）
+     * 加一句硬写的注释，理由是"多账号是同一个机器人接了两份账号配置，画成两张
+     * 几乎一样的卡会让人以为是两套系统" —— 但那是实现者的判断，不是使用者的：
+     * 两个号就是两个号，名字、头像、在线状态、好友数各是各的，合掉一张等于少说一个。
+     *
+     * 只给一个号的夹具发现不了这件事（`slice(0, 1)` 也能过），故这里必须给两个，
+     * 且两个号的昵称不同 —— 断言的是"两张卡各自带着自己的名字"，而不只是"长度是 2"。
+     */
+    const first = makeState().bots[0]!
+    const state = makeState({
+      bots: [first, { ...first, nickname: "第二个号", uin: "10002", statusKey: "offline" }]
+    })
+    const cards = toBotCards(state)
+    expect(cards).toHaveLength(2)
+    expect(cards[0]?.nickname).toBe("测试号")
+    expect(cards[1]?.nickname).toBe("第二个号")
+    // 状态图标也得各取各的，不能两张卡共用第一个号的
+    expect(cards[0]?.status).toBe("11")
+    expect(cards[1]?.status).toBe("41")
+  })
+
   it("头像空时不出现 `avatar` —— 模板据此显示空框而不是坏图", () => {
-    const state = makeState({ bot: { ...makeState().bot, avatar: "" } })
+    const state = makeState({ bots: [{ ...makeState().bots[0]!, avatar: "" }] })
     expect("avatar" in toBotCards(state)[0]!).toBe(false)
   })
 
   it("联系人数取不到时不放进 `countContacts`", () => {
     const state = makeState({
-      bot: { ...makeState().bot, friendCount: undefined, groupCount: undefined }
+      bots: [{ ...makeState().bots[0]!, friendCount: undefined, groupCount: undefined }]
     })
     expect(toBotCards(state)[0]?.countContacts).toEqual({})
   })
 
   it("联系人数给到时按键放进去", () => {
-    const state = makeState({ bot: { ...makeState().bot, friendCount: 12, groupCount: 3 } })
+    const state = makeState({ bots: [{ ...makeState().bots[0]!, friendCount: 12, groupCount: 3 }] })
     expect(toBotCards(state)[0]?.countContacts).toEqual({ 好友: "12", 群: "3" })
   })
 
@@ -223,7 +248,7 @@ describe("toBotCards", () => {
      * 插件就显示几个名字。故夹具里同时给两个适配器，断言只出账号名下的那个。
      */
     const state = makeState({
-      bot: { ...makeState().bot, adapterName: "标准输入" },
+      bots: [{ ...makeState().bots[0]!, adapterName: "标准输入" }],
       adapters: [
         { name: "NapCat (OneBot v11)", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" },
         { name: "标准输入", accounts: 1, online: 1, status: "在线", statusColor: "#2EC272" }

@@ -188,22 +188,29 @@ export default definePlugin({
     }
 
     /**
-     * 取本次要画的那个账号
+     * 取本次要画的那些账号
      *
-     * 规则是「消息来自哪个号就画哪个号」，取不到退到第一个在线的，再退到第一个。
-     * 多号场景下这才是使用者想问的那个 —— 他在 A 号上发「#状态」，想看的是 A。
+     * **全部列出，一个号一张卡** —— 源插件就是如此。开头那个是「消息来自哪个号」，
+     * 多号场景下使用者最想看的就是它，故把它排在最前；其余按内核给出的顺序跟上。
+     * 说话的那个号不在已配账号里（比如它是个还没入列的号）时，最前那个退回
+     * 「第一个在线的」，仍取不到就是列表的第一个。
      * @param e 事件
-     * @returns 账号状态快照与它的 Bot；一个账号都没配时 undefined
+     * @returns 账号状态快照与它的 Bot；一个账号都没配时为空数组
      */
-    const pickAccount = (e: MessageEvent): PickedAccount | undefined => {
+    const pickAccounts = (e: MessageEvent): PickedAccount[] => {
       const accounts = ctx.app.accounts.list()
       const mine =
         accounts.find(account => account.record.selfId === e.selfId) ??
         accounts.find(account => account.status === "online") ??
         accounts[0]
-      if (mine === undefined) return undefined
-      const selfId = mine.record.selfId ?? e.selfId
-      return { account: mine, bot: ctx.app.bots.bySelfId(selfId) }
+      if (mine === undefined) return []
+
+      // 说话的那个号排最前，其余保持内核顺序，不重复
+      const ordered = [mine, ...accounts.filter(account => account !== mine)]
+      return ordered.map(account => {
+        const selfId = account.record.selfId ?? ""
+        return { account, bot: ctx.app.bots.bySelfId(selfId) }
+      })
     }
 
     ctx.command(STATE_PATTERN, { desc: "查看机器人状态；加 pro 显示更多，加 debug 只看耗时" }).action(
@@ -220,8 +227,8 @@ export default definePlugin({
 
         await exclusive("状态", async () => {
           const recorder = new DebugRecorder(isDebug)
-          const picked = pickAccount(e)
-          if (picked === undefined) {
+          const picked = pickAccounts(e)
+          if (picked.length === 0) {
             await e.reply("还没有配置任何账号，状态图没有可显示的对象")
             return
           }
@@ -230,10 +237,24 @@ export default definePlugin({
            * 头像要先取，因为取它本身是异步的（要问适配器）
            *
            * 放在 `recorder.time` 之外：那一步计的是采集耗时，而问适配器是网络往返，
-           * 混进去会让「采集慢」与「平台响应慢」分不开 —— 后者不是本插件的问题
+           * 混进去会让「采集慢」与「平台响应慢」分不开 —— 后者不是本插件的问题。
+           * 几个号并发问，一个问不到只影响它自己那张卡。
            */
-          const selfId = picked.account.record.selfId ?? e.selfId
-          const avatar = await avatarOf(picked.bot, selfId)
+          const bots = await Promise.all(
+            picked.map(async ({ account, bot }) => {
+              const selfId = account.record.selfId ?? ""
+              const avatar = await avatarOf(bot, selfId)
+              return {
+                adapterId: account.record.adapterId,
+                nickname: account.nickname ?? bot?.nickname ?? "",
+                selfId,
+                status: account.status,
+                since: account.since,
+                retries: account.retries,
+                ...(avatar === undefined ? {} : { avatarUrl: avatar })
+              }
+            })
+          )
 
           const view = await recorder.time(
             buildState({
@@ -250,13 +271,7 @@ export default definePlugin({
                 since: account.since,
                 retries: account.retries
               })),
-              selfId,
-              adapterId: picked.account.record.adapterId,
-              nickname: picked.account.nickname ?? picked.bot?.nickname ?? "",
-              status: picked.account.status,
-              since: picked.account.since,
-              retries: picked.account.retries,
-              ...(avatar === undefined ? {} : { avatarUrl: avatar }),
+              bots,
               monitor,
               http: ctx.http,
               bgDir: ctx.resource(RES_DIR, "img", "bg"),
@@ -442,7 +457,8 @@ export function toTemplateData(
 export function plainSummary(view: StateView): string {
   const lines = [
     "状态图渲染失败，以下是关键数据：",
-    `账号：${view.bot.nickname}（${view.bot.uin}）· ${view.bot.status}`,
+    // 每个号一行 —— 图上是一个号一张卡，纯文本兜底也该把它们都列出来
+    ...view.bots.map(bot => `账号：${bot.nickname}（${bot.uin}）· ${bot.status}`),
     `系统：${view.system.os} ${view.system.hostname}`,
     `运行：${view.system.uptime} · Node ${view.system.nodeVersion}`
   ]
