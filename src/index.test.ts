@@ -18,9 +18,11 @@
  */
 
 import { describe, expect, it } from "vitest"
-import { sep } from "node:path"
+import { existsSync, readdirSync } from "node:fs"
+import { dirname, join, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 import { CONFIG_SCHEMA } from "./config.js"
-import { avatarOf, toTemplateData } from "./index.js"
+import { RES_DIR, avatarOf, toTemplateData } from "./index.js"
 import { copyrightLine } from "./collect/system.js"
 import type { BotApi } from "@yunzai-ng/types"
 import type { StateView } from "./view/build.js"
@@ -102,6 +104,80 @@ const ctx = { root: "D:/plugin" }
 
 /** 两个版本号；版权行要用 */
 const VERSIONS = { framework: "0.5.1", plugin: "0.1.0" }
+
+/**
+ * 插件交给采集层的两条资源路径**必须指向真文件**
+ *
+ * **缺陷现场：`ctx.resource("img", "default_avatar.jpg")` 少写了 `resources` 那一段。**
+ * `ctx.resource()` 是相对**插件根**拼的（内核的测试里写的是
+ * `ctx.resource("resources", "img", "bg.png")`），于是拼出的是
+ * `<插件根>/img/default_avatar.jpg` —— 一个不存在的路径。
+ *
+ * 这条缺陷没有任何前置信号，而症状又格外具有迷惑性：
+ *
+ *   - 路径拼得出来，不抛错、不告警，`pnpm run verify` 全绿
+ *   - 渲染照常成功出图，只是头像那一格是空的
+ *   - 同一张图里**别的图标全都正常** —— 因为 `icon/` 那类是渲染器按
+ *     `<插件根>/resources/` 自己拼的，与这两条路径无关
+ *
+ * 于是看起来像"就头像那一张图坏了"，而人会去查模板、查 CSS、查 Chromium 能不能
+ * 加载 `file://`（实机上正是这么绕了一大圈）。
+ *
+ * 故这里不比字符串，直接查磁盘：**这两条路径底下真有对应的文件**，
+ * 且路径是拿内核**真的** `ctx.resource()` 拼出来的。
+ */
+describe("资源路径", () => {
+  /** 本插件目录 */
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..")
+
+  /**
+   * 用内核真的 `ctx.resource()` 拼一条路径
+   *
+   * **不复刻它的拼法。** 复刻的话，内核改了拼法这里不会知道 —— 而这条断言的全部
+   * 意义就在于「本插件的调用方式与内核的语义对得上」。故把内核那份装配起来真调一次。
+   * @param parts 路径片段
+   * @returns 绝对路径
+   */
+  const resource = async (...parts: string[]): Promise<string> => {
+    const { createPluginContext } = await import("@yunzai-ng/core")
+    const { ctx } = createPluginContext({
+      name: "yenai-state",
+      version: "0.1.0",
+      root,
+      dataDir: join(root, "node_modules", ".cache"),
+      // 以下各项本用例都不会碰到，给空壳即可
+      logger: { debug() {}, info() {}, warn() {}, error() {} },
+      kv: {},
+      config: {},
+      app: {},
+      // 上下文构造时会调 `extend()` 拿一份带默认值的客户端，故这一项要有
+      http: { extend: () => ({ request: async () => ({}) }) },
+      services: {},
+      events: {},
+      hooks: {},
+      registry: { add() {}, dispose() {} },
+      signal: new AbortController().signal
+    } as never)
+    return (ctx as { resource: (...p: string[]) => string }).resource(...parts)
+  }
+
+  it("**默认头像指向 plugins/yenai-state/resources/img/default_avatar.jpg**", async () => {
+    // 这一条就是那个缺陷本身：写成 `resource("img", ...)` 时它会断在这里
+    const path = await resource(RES_DIR, "img", "default_avatar.jpg")
+    expect(existsSync(path), `默认头像不存在：${path}`).toBe(true)
+  })
+
+  it("**背景目录指向 resources/img/bg 且里面有图**", async () => {
+    const dir = await resource(RES_DIR, "img", "bg")
+    expect(existsSync(dir), `背景目录不存在：${dir}`).toBe(true)
+    expect(readdirSync(dir).length, "背景目录是空的，兜底背景将无从取起").toBeGreaterThan(0)
+  })
+
+  it("`RES_DIR` 就是 `resources` —— 它不是可有可无的一段", () => {
+    // 把它删掉、或写成空串，上面两条会断
+    expect(RES_DIR).toBe("resources")
+  })
+})
 
 describe("toTemplateData", () => {
   it("`Config` 给全了前端脚本会解构的每一项 —— 少一项脚本就整段不执行", () => {

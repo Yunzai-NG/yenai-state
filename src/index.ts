@@ -45,6 +45,18 @@ const MONITOR_TEMPLATE = "monitor.html"
 const LAYOUT_FILE = "layout/default.html"
 
 /**
+ * 静态资源目录的目录名
+ *
+ * **`ctx.resource()` 是相对插件根拼的，故这一段要自己带上。** 少写它的症状极具迷惑性：
+ * 路径拼得出来、文件不报错、渲染照常成功，只是 `<img>` 指向一个不存在的文件，
+ * 图上那一格是空的 —— 而其它资源（图标那类是渲染器按 `<插件根>/resources/` 自己拼的）
+ * 全都正常，于是看起来像"就那一张图坏了"。
+ *
+ * 导出它是为了测试能断言"这两条路径底下真有文件"，而不是比对字符串。
+ */
+export const RES_DIR = "resources"
+
+/**
  * 状态命令的触发模式
  *
  * 两个具名捕获组就是那两个开关。整体匹配（`^...$`）而非前缀匹配：前缀匹配下
@@ -246,8 +258,8 @@ export default definePlugin({
               ...(avatar === undefined ? {} : { avatarUrl: avatar }),
               monitor,
               http: ctx.http,
-              bgDir: ctx.resource("img", "bg"),
-              defaultAvatar: ctx.resource("img", "default_avatar.jpg"),
+              bgDir: ctx.resource(RES_DIR, "img", "bg"),
+              defaultAvatar: ctx.resource(RES_DIR, "img", "default_avatar.jpg"),
               logger
             }),
             "buildState"
@@ -280,7 +292,7 @@ export default definePlugin({
           ctx.http,
           config.style.backdrop,
           config.style.backdropDefault,
-          ctx.resource("img", "bg"),
+          ctx.resource(RES_DIR, "img", "bg"),
           (message, err) =>
             logger.warn(`[背景] ${message}：${err instanceof Error ? err.message : String(err)}`)
         ).catch(() => undefined)
