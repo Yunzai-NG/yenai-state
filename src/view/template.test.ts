@@ -13,12 +13,14 @@
  *          能被自动测出来、又确实会坏得很难看的东西。
  */
 
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { RING_PERIMETER } from "../collect/resources.js"
 import type { ResourceRing } from "../collect/resources.js"
+import { toNetworkView } from "../collect/network.js"
 import type { StateView } from "./build.js"
 import { statusIcon, toBotCards, toOtherInfo, toTemplate, toTemplateRing } from "./template.js"
 
@@ -295,5 +297,124 @@ describe("toTemplate", () => {
     )
     expect(out.network?.psTest).toHaveLength(1)
     expect("speed" in (out.network ?? {})).toBe(false)
+  })
+
+  it("有累计量、没有瞬时速率时：外层 `speed` 在，内层 `speed` 不在", () => {
+    // 这是刚启动时的常态（`si` 的 `rx_sec` 要两次采样才算得出来）。
+    // 模板读的是 `network.speed.speed.upload` —— 外层是开关、内层是数据，
+    // 内层缺失正是 `Cannot read properties of undefined (reading 'speed')` 的来源
+    const traffic = toNetworkView({ rx_bytes: 1024 ** 3, tx_bytes: 1024 ** 3 })
+    expect(traffic?.speed).toBeUndefined()
+    expect(traffic?.traffic).toBeDefined()
+
+    const out = toTemplate(makeState({ network: traffic }))
+    const net = out.network as { speed?: { speed?: unknown; traffic?: unknown } }
+    expect(net.speed, "外层 speed 是板块开关，必须恒在").toBeDefined()
+    expect(net.speed?.speed, "内层的瞬时速率此时不该出现").toBeUndefined()
+    expect(net.speed?.traffic).toBeDefined()
+  })
+})
+
+/**
+ * 模板本身能不能编译
+ *
+ * **这一条测的不是翻译层，是模板的语法。** 模板坏掉时没有任何前置信号：`pnpm run verify`
+ * 全绿、类型检查全绿，直到真机上敲一次 `#状态` 才在渲染器的日志里冒出来一行
+ * `CompileError: Invalid or unexpected token`，而那时人已经在别处排查了（实机上撞到过，
+ * 起因是我往模板里加了花括号包起来的块注释 —— 这套 art-template 不认那种写法，
+ * 它把里面的内容当成一个 JS 表达式求值）。
+ *
+ * 故直接编译一遍。`art-template` 是渲染器的依赖、不是本插件的，故用 `createRequire`
+ * 从渲染器那里解 —— 解不到就跳过，避免本插件的测试因为"没装渲染器"而红。
+ */
+describe("templates/state.html", () => {
+  /** 本插件的 `templates/` 目录 */
+  const templatesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates")
+
+  it("整份模板能被 art-template 编译 —— 语法错只在真机渲染时才暴露", () => {
+    const require = createRequire(import.meta.url)
+    let art: { compile: (src: string, opts: Record<string, unknown>) => unknown }
+    try {
+      // 从渲染器解析：art-template 归它管，本插件不重复声明
+      art = require(
+        require.resolve("art-template", {
+          paths: [join(templatesDir, "..", "..", "renderer-puppeteer")]
+        })
+      ) as typeof art
+    } catch {
+      return // 没装渲染器，跳过
+    }
+
+    const src = readFileSync(join(templatesDir, "state.html"), "utf8")
+    expect(() =>
+      art.compile(src, {
+        filename: join(templatesDir, "state.html"),
+        // 编译期只做语法检查，不求值，故这些给什么都行 —— 但必须给，
+        // 否则未声明的标识符会被当成"运行时再说"而放过去
+        imports: { _res_path: "", defaultLayout: "" }
+      })
+    ).not.toThrow()
+  })
+
+  it("模板里没有 `{{/* ... */}}` —— 这套 art-template 不认这种注释", () => {
+    // 它把 `{{/* x */}}` 解析成 `{{` + 表达式 `/* x */` + `}}`，生成
+    // `$$out+=$escape(* x */)`，编译期即炸。注释用 HTML 的 `<!-- -->`
+    const src = readFileSync(join(templatesDir, "state.html"), "utf8")
+    expect(src).not.toMatch(/\{\{\s*\/\*/)
+  })
+})
+
+/**
+ * 背景值的形状
+ *
+ * **`Backdrop.css` 本身就是一整个 `url(...)` 值，模板不能再包一层。** 曾经两张模板里
+ * 写的都是 `background-image:url({{...backdrop}})`，于是拼出 `url(url("data:..."))` ——
+ * 浏览器把这个值解析成空串**默默丢弃**，`.container` 就一直是 CSS 里的灰底。
+ *
+ * 这条缺陷没有任何前置信号：背景图下载是成功的（`from: "network"`）、日志一个字都不报、
+ * 渲染也成功出图，只是图里没有背景。故这里从两头夹住 —— 产出侧断言形状，
+ * 模板侧断言没有再包一层。
+ */
+describe("背景值", () => {
+  /** 本插件的 `templates/` 目录 */
+  const templatesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates")
+
+  it("`Backdrop.css` 是完整的 `url(...)` 值", async () => {
+    const { pickBuiltinBackdrop } = await import("./style.js")
+    const bgDir = join(templatesDir, "..", "resources", "img", "bg")
+    const backdrop = await pickBuiltinBackdrop(bgDir)
+    expect(backdrop).toBeDefined()
+    expect(backdrop?.css.startsWith("url(")).toBe(true)
+    expect(backdrop?.css.endsWith(")")).toBe(true)
+  })
+
+  it("模板直接输出背景值，**既不再套 `url()`、也不能被转义**", () => {
+    /*
+     * 两处都必须对，而错任何一处的症状是同一个：浏览器把值丢成空串、图里没有背景，
+     * 且日志一个字都不报。
+     *
+     *   1. 值本身就是 `url("data:...")`，模板再包一层就是 `url(url(...))` —— 非法，丢成空串
+     *   2. 值里带双引号，走 `{{ }}` 会被 HTML 转义成 `&#34;`；而它在 `<style>` 里是 CSS、
+     *      不是 HTML，浏览器不解实体 —— 于是 `url(&#34;data:...&#34;)` 同样非法
+     *
+     * 故这里要求恰好是 `{{@...}}`（art-template 的不转义输出），且前面不带 `url(`。
+     */
+    for (const file of ["state.html", "monitor.html"]) {
+      const src = readFileSync(join(templatesDir, file), "utf8")
+      expect(src, `${file} 又把背景值套了一层 url()`).not.toMatch(/background-image:\s*url\(\s*\{\{/)
+      expect(src, `${file} 的背景走了转义输出，引号会变成 &#34;`).toMatch(
+        /background-image:\s*\{\{@[^}]+\}\}/
+      )
+    }
+  })
+
+  it("背景取不到时给空串，模板里 `background-image:` 落空是安全的", () => {
+    // 浏览器把空值恢复成 `none`、不动 background-color，故不必为这种情况在模板里加判断
+    const out = toTemplate(makeState())
+    expect(out.style.backdrop).toBe("")
+    expect(() => {
+      const src = readFileSync(join(templatesDir, "state.html"), "utf8")
+      return src.replace("{{style.backdrop}}", out.style.backdrop)
+    }).not.toThrow()
   })
 })

@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="{{_res_path}}css/index.css" />
 <style>
     .container {
-        background-image:url({{style.backdrop}})
+        background-image:{{@style.backdrop}}
     }
 </style>
 {{/block}}
@@ -208,7 +208,7 @@
 <script src="{{_res_path}}js/style.js"></script>
 
 
-{{if network.speed || network.psTest}}
+{{if network && (network.speed || network.psTest)}}
 <div class="box" data-boxInfo="网络">
     {{if network.speed}}
     <div class="networkInfo">
@@ -224,6 +224,13 @@
         </div>
         {{/if}}
         <div class="data">
+            <!--
+              内层的 speed 是「瞬时速率」，可能不存在：si 的 rx_sec / tx_sec 要采过两次
+              才算得出来，进程刚起来那会儿这两个字段是 null，采集层据此只给 traffic 不给
+              speed。而外层那个 speed 是「有网速这一块」的开关，恒存在。少了这一层判断，
+              模板会在内层 speed 为 undefined 时取 .upload 而整张图渲染失败（实机撞到过）。
+            -->
+            {{if network.speed.speed}}
             <div class="upload">
                 <div class="icon">
                     <img src="{{_res_path}}icon/上传.png">
@@ -245,6 +252,7 @@
                             class="unit">{{network.speed.speed.download.suffix}}/s</span></p>
                 </div>
             </div>
+            {{/if}}
             {{if network.speed.traffic}}
             <div class="uploadVolume">
                 <div class="icon">

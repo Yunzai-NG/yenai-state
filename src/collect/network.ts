@@ -76,6 +76,14 @@ const COLOR_INFO = "#03A9F4"
  *
  * 速率与累计量都要求成对出现：只有下行没有上行时，画出来的两个数字会让使用者以为
  * 上行真的是 0。宁可整块不显示。
+ *
+ * **`speed` 不一定在，模板必须判它。** `si` 的 `rx_sec` / `tx_sec` 是两次采样的差值，
+ * 进程刚起来那会儿 `si` 给的是 `null` —— 此时只有 `rx_bytes` / `tx_bytes` 可用，
+ * 本函数于是**只给 `traffic` 不给 `speed`**。而 `templates/state.html` 读的是
+ * `network.speed.speed.upload`：外层那个 `speed` 是"有网速这一块"的开关（恒存在），
+ * 内层那个才是本函数的返回值。模板少了内层判断就会在 `undefined` 上取 `.upload`，
+ * 整张图渲染失败 —— 实机上报的是 `Cannot read properties of undefined (reading 'speed')`，
+ * 且只在刚启动、还没采到第二拍时出现。
  * @param sample 采样；未采到时为 undefined
  * @returns 网速数据；无有效数据时 undefined（模板据此隐去整个板块）
  */
