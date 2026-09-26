@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest"
 import { CONFIG_SCHEMA, RESOURCE_ITEMS, showFastFetchFor, showFor } from "./config.js"
-import { parseSiteLine } from "./collect/network.js"
+import { siteOf } from "./collect/network.js"
 
 describe("showFor", () => {
   it("`true` 在任何情况下都显示", () => {
@@ -145,6 +145,25 @@ describe("CONFIG_SCHEMA", () => {
     expect(CONFIG_SCHEMA.safeParse({ psTestSites: { concurNum: 5 } }).ok).toBe(true)
   })
 
+  it("网址项:填了就必须是 http(s)://,留空放行", () => {
+    // 留空是「这一项暂不填」,面板新加一项时它就是空的,不该拦
+    expect(CONFIG_SCHEMA.safeParse({ psTestSites: { list: [{ name: "空", url: "", useProxy: false }] } }).ok).toBe(true)
+    // 填了就得对
+    expect(
+      CONFIG_SCHEMA.safeParse({ psTestSites: { list: [{ name: "A", url: "https://a.com", useProxy: false }] } }).ok
+    ).toBe(true)
+    // 填错报到 list[0].url 上,面板据此标红那一项
+    const wrong = CONFIG_SCHEMA.safeParse({ psTestSites: { list: [{ name: "A", url: "ftp://a.com", useProxy: false }] } })
+    expect(wrong.ok).toBe(false)
+    expect(wrong.ok === false && wrong.issues.some(i => i.path === "psTestSites.list[0].url")).toBe(true)
+  })
+
+  it("网址项:名称与走代理都可缺,各自回落默认", () => {
+    const cfg = CONFIG_SCHEMA.safeParse({ psTestSites: { list: [{ url: "https://a.com" }] } })
+    expect(cfg.ok).toBe(true)
+    expect(cfg.ok && cfg.value.psTestSites.list[0]).toMatchObject({ name: "", useProxy: false })
+  })
+
   it("进程个数有上下限", () => {
     const bad = { processLoad: { showMax: { showNum: 0 } } }
     expect(CONFIG_SCHEMA.safeParse(bad).ok).toBe(false)
@@ -173,15 +192,15 @@ describe("CONFIG_SCHEMA", () => {
 
   it("缺省配置里没有 URL 为空的白名单项之类会让采集侧崩掉的空值", () => {
     /*
-     * 「测试的网址」这一项跨了两层：config 给出的是文本行，network 的 `parseSiteLine`
-     * 才把它翻成网址。故此处不能只看默认值非空，而要**整条链路走通**：
-     * 默认值必须是解析器认得的写法，否则开箱即用时那张表就是空的。
+     * 「测试的网址」这一项跨了两层：config 给出的是对象数组，network 的 `siteOf`
+     * 才把它规整成可测的项。故此处不能只看默认值非空，而要**整条链路走通**：
+     * 默认值必须是规整器认得的写法，否则开箱即用时那张表就是空的。
      *
-     * 这样断言也把两处绑在了一起 —— 默认值改成一种解析器不认的格式，这里就红。
+     * 这样断言也把两处绑在了一起 —— 默认值改成一种规整器认不出的格式，这里就红。
      */
     const cfg = CONFIG_SCHEMA.defaults()
-    for (const line of cfg.psTestSites.list) {
-      const site = parseSiteLine(line, 0, () => undefined)
+    for (const entry of cfg.psTestSites.list) {
+      const site = siteOf(entry, 0, () => undefined)
       expect(site?.url).not.toBe("")
       expect(site?.name).not.toBe("")
     }

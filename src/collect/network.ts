@@ -181,63 +181,51 @@ export interface SiteSpec {
   readonly useProxy: boolean
 }
 
-/** 判为"走代理"的写法 */
+/** 判为"走代理"的写法 —— 配置里 `useProxy` 是布尔，但手写 yaml 里也可能是 `1`/`true` 字符串 */
 const TRUTHY = new Set(["1", "true", "yes", "是"])
 
 /** 合法网址的前缀 */
 const URL_PREFIX = /^https?:\/\//i
 
 /**
- * 把配置里的一行文本解析成一条测试项
+ * 把配置里的一个站点对象规整成一条测试项
  *
- * 一行写成 `名称 | 网址 | 走代理`。**宽松解析、解释性告警**：面板上药丸里打字比点选容易写错，
- * 因此只在"这一项无论如何都用不了"时告警并跳过（见下），其余一律设法解释出一个可用的结果。
+ * `psTestSites.list` 是对象数组 `[{ name, url, useProxy }]`（面板由 `ObjectList` 编辑）。
+ * **宽松规整、解释性告警**：只在"这一项无论如何都用不了"时告警并跳过，其余一律设法解释出
+ * 一个可用的结果 —— 与本目录其他采集"取不到就不显示"的取舍一致，一个写错的项不该连累其余。
  *
  * 几条规则各自的理由：
  *
- * - **全角竖线一并接受。** 中文输入法下打出 `｜` 是最常见的一种写错，而它与半角长得几乎
- *   一样，不归一化的话使用者只会看到"我配的这一项不见了"，找不到原因。
- * - **只按前两个分隔符切。** 未转义的 `|` 在 URL 里非法，故网址本身不含分隔符，不需要转义
- *   机制；但反过来说，多切出来的段只能来自多打的竖线，此时把**前两段**当名称与网址
- *   （多出来的段并入代理那一段只会让代理判定失败，而它本来也有默认值）比报错删项有用得多。
+ * - **`url` 留空返回 undefined 且不告警**：面板上新加一项时 `url` 就是空的，那不是错误。
+ * - **`url` 不是 http(s):// 时告警并跳过这一项**，而不是让整次测试失败。
  * - **名称留空时用网址兜底。** 表格那一列本该写着"这是哪个站"，空着一格等于没写。
- * - **代理写法认不出时不告警** —— 与"没写"等价，而默认就是不代理。
- * - **网址不是 http(s):// 时告警并跳过这一项，而不是让整次测试失败。** 一个写错的项不该
- *   连累另外九项也测不成，与本目录其他采集"取不到就不显示"的取舍一致。
- * - **整行空白返回 undefined 且不告警**：药丸输入框允许存在空项，那不是错误。
+ * - **`useProxy` 容错**：schema 里它是布尔，但手写 yaml 里可能是 `1` / `"true"` 一类，一并认。
+ * - **非对象元素当空处理**：内核校验是最后一道，这里只求不崩。
  *
  * `name` 由调用方转义后再输出（模板里那一格不转义，见 `probeOne`）。
- * @param line 配置里的一行
- * @param index 行号，从 0 起，仅用于兜底名字
- * @param onWarn 解析不了时的告知方式
- * @returns 解析结果；整行用不了时 undefined
+ * @param entry 配置里的一个站点对象
+ * @param index 序号，从 0 起，仅用于告警里的项号
+ * @param onWarn 规整不了时的告知方式
+ * @returns 规整结果；这一项用不了时 undefined
  */
-export function parseSiteLine(
-  line: string,
+export function siteOf(
+  entry: unknown,
   index: number,
   onWarn: (message: string) => void
 ): SiteSpec | undefined {
-  const parts = line.replace(/｜/g, "|").split("|")
-  const [first = "", second, ...rest] = parts.map(part => part.trim())
-
-  /*
-   * 只有一段时，这一段就是网址
-   *
-   * 与"名称留空"合起来看：两种写法解析出的结果相同，故下面统一按 `second` 是否给出来分。
-   */
-  const url = second === undefined ? first : second
+  const obj = typeof entry === "object" && entry !== null && !Array.isArray(entry) ? (entry as Record<string, unknown>) : {}
+  const url = String(obj.url ?? "").trim()
   if (url === "") return undefined
 
   if (!URL_PREFIX.test(url)) {
-    onWarn(`第 ${index + 1} 项「${line.trim()}」不是 http:// 或 https:// 开头的网址，已跳过`)
+    onWarn(`第 ${index + 1} 项「${url}」不是 http:// 或 https:// 开头的网址，已跳过`)
     return undefined
   }
 
-  // 名称取第一段；未给或留空（`| https://x.com`）时用网址兜底
-  const name = (second === undefined ? "" : first) === "" ? url : first
-  // 多余的段一律不看：那只能是多打的竖线，而网址已经取到了
-  const proxy = rest.length > 0 ? (rest[0] ?? "") : ""
-  return { name, url, useProxy: TRUTHY.has(proxy.toLowerCase()) }
+  const rawName = String(obj.name ?? "").trim()
+  const name = rawName === "" ? url : rawName
+  const useProxy = obj.useProxy === true || TRUTHY.has(String(obj.useProxy ?? "").trim().toLowerCase())
+  return { name, url, useProxy }
 }
 
 /**

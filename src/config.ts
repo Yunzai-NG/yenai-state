@@ -8,10 +8,10 @@
  *          `true | false | pro` 三态语义，而不是被"改良"成布尔 —— 三态里 `pro` 与 `true` 的区别
  *          是使用者实际依赖的（"只在状态pro里显示"）。
  *
- *          **唯一的例外是 `psTestSites.list`。** 源插件那里是 `[{ name, url, useProxy }]` 的
- *          对象数组，此处是「一行一项」的字符串数组 —— 面板渲染不了对象数组（一渲染就是
- *          `[object Object]`，且写回时会把字段毁成字符串数组），详见该字段自己的注释。
- *          读到文件头这句"逐一对齐"时，别以为 `list` 是抄漏了。
+ *          `psTestSites.list` 也是对象数组 `[{ name, url, useProxy }]`，与源插件一致 ——
+ *          **曾经它被迫退成「一行一项」的字符串**，因为那时面板渲染不了对象数组（一渲染就是
+ *          `[object Object]`、写回还会把字段毁掉）。面板补上对象数组控件（`ObjectList`）后
+ *          这个将就取消了，网址列表回到结构化的对象形态，解析见 `collect/network.ts` 的 `siteOf`。
  *
  *          **三态一律用 `s.select(...)` 而不是 `s.enum(...)`。** enum 在面板上渲染为一个下拉，
  *          每项只有取值本身；select 允许给每项配 label 与 description，于是"pro 是什么意思"
@@ -126,26 +126,41 @@ export const CONFIG_SCHEMA = s.object({
         .title("显示网站测试")
         .desc("逐条请求下列网址并报告状态码与延迟"),
       /*
-       * 一项一行文本，而不是源插件那样的对象数组
+       * 对象数组：一项一个站点，字段与源插件一致
        *
-       * 源插件这里是 `[{ name, url, useProxy }]`。改成字符串是**被迫的**：面板的字段组件
-       * 把一切数组都渲染成药丸输入框，而药丸会把每一项 `String()` 一遍 —— 元素是对象时
-       * 那就是一片 `[object Object]`；更糟的是它写回的是字符串化过的数组，使用者在面板上
-       * 点一下「＋ 添加」，整个字段就从对象数组变成字符串数组，采集侧此后读到的 `url`
-       * 一律是 `undefined`。面板没有对象数组控件（可用控件见内核的 `SchemaWidget`），
-       * 故只能改用面板已经支持的一种形态，由本插件自己解析。
-       *
-       * 这是本插件与源插件**唯一**对不上的字段，解析见 `collect/network.ts` 的 `parseSiteLine`。
+       * 曾经这里被迫是字符串数组（`名称 | 网址 | 走代理` 一行一项）—— 那时面板把一切数组都
+       * 渲染成药丸输入框，元素是对象时就成一片 `[object Object]`，写回还会把对象拍成字符串。
+       * 面板补上对象数组控件后回到结构化形态。`url` 留空或写错的项在采集侧跳过，不阻断保存
+       * （见 `collect/network.ts` 的 `siteOf`），故各字段都给默认值、不设会让保存失败的约束。
        */
       list: s
-        .array(s.string())
-        .default(["Baidu | https://baidu.com | 0", "Google | https://google.com | 1"])
+        .array(
+          s.object({
+            name: s.string().default("").title("名称").desc("表格里显示的名字，留空则用网址"),
+            url: s
+              .string()
+              .default("")
+              .title("网址")
+              .desc("要访问的完整 URL，须以 http:// 或 https:// 开头。留空表示这一项暂不填")
+              .placeholder("https://example.com")
+              // 填了就必须是 http(s)://，但**留空放行** —— 面板上新加一项时它就是空的，
+              // 那不是错误。非空而写错时报到 list[i].url 上，面板据此标红那一项
+              .check("网址须以 http:// 或 https:// 开头（留空表示这一项暂不填）", value =>
+                value === "" ? true : /^https?:\/\//i.test(value)
+              ),
+            useProxy: s
+              .boolean()
+              .default(false)
+              .title("走代理")
+              .desc("走框架的全局代理，境外站点通常需要")
+          })
+        )
+        .default([
+          { name: "Baidu", url: "https://baidu.com", useProxy: false },
+          { name: "Google", url: "https://google.com", useProxy: true }
+        ])
         .title("测试的网址")
-        .desc(
-          "一项一行，用竖线隔开三段：「名称 | 网址 | 走代理」。" +
-            "名称可以留空，那就用网址当名字。走代理写 1 表示走框架的全局代理（境外站点通常需要），" +
-            "写 0 或不写则直连。例：Google | https://google.com | 1"
-        ),
+        .desc("每一项一个站点。名称留空则用网址当名字；走代理供境外站点使用。"),
       timeout: s
         .duration()
         .default("5s")
@@ -294,14 +309,15 @@ export const CONFIG_SCHEMA = s.object({
       BotNameColor: s
         .string()
         .default("#000")
+        .widget("color")
         .title("账号昵称颜色")
         .desc(
           "以 gradient: 开头即为渐变色，如 gradient:271.14deg,#001bff 0.98%,#00f0ff 25.79%"
         ),
       progressBarColor: s
         .object({
-          high: s.string().default("#d73403").title("高危色").desc("占用达到 90% 及以上时使用"),
-          medium: s.string().default("#ffa500").title("警戒色").desc("占用达到 70% 及以上时使用"),
+          high: s.string().default("#d73403").widget("color").title("高危色").desc("占用达到 90% 及以上时使用"),
+          medium: s.string().default("#ffa500").widget("color").title("警戒色").desc("占用达到 70% 及以上时使用"),
           low: s
             .array(s.string())
             .default(["#84A0DF", "#2EC272", "#8070F9"])
@@ -311,9 +327,9 @@ export const CONFIG_SCHEMA = s.object({
         .title("进度条配色"),
       botInfoColor: s
         .object({
-          botVersion: s.string().default("#FBE0F3").title("版本标签底色").desc("版本号标签的背景色"),
-          platform: s.string().default("#F0EDF2").title("平台标签底色").desc("协议端标签的背景色"),
-          botRunTime: s.string().default("#F1EBFA").title("运行时长标签底色").desc("运行时长标签的背景色"),
+          botVersion: s.string().default("#FBE0F3").widget("color").title("版本标签底色").desc("版本号标签的背景色"),
+          platform: s.string().default("#F0EDF2").widget("color").title("平台标签底色").desc("协议端标签的背景色"),
+          botRunTime: s.string().default("#F1EBFA").widget("color").title("运行时长标签底色").desc("运行时长标签的背景色"),
           contacts: s
             .array(s.string())
             .default(["#F1EDFE", "#FDF1E6", "#E9F4FC"])
