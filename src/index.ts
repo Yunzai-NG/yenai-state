@@ -19,7 +19,6 @@
  *          而那两个词在正则里的先后是明确的。
  */
 
-import { createRequire } from "node:module"
 import { join } from "node:path"
 import { definePlugin, parseDuration } from "@yunzai-ng/core"
 import type { AccountState, BotApi, Logger, MessageEvent } from "@yunzai-ng/types"
@@ -81,11 +80,8 @@ interface PickedAccount {
 }
 
 export default definePlugin({
+  // 版本、说明、作者与主页取 package.json；name 留着，省掉要内核 0.6.5
   name: "yenai-state",
-  version: "0.1.0",
-  description: "椰奶状态 / 状态pro / 监控 —— 机器人运行状况一览",
-  author: "Yunzai-NG",
-  homepage: "https://github.com/Yunzai-NG/yenai-state",
   configSchema: CONFIG_SCHEMA,
 
   setup(ctx) {
@@ -130,15 +126,8 @@ export default definePlugin({
       })
     }
 
-    /*
-     * 两个版本号，给版权行用
-     *
-     * 框架版本在运行期固定、插件版本更是编译期常量，故在这里取一次即可 —— 与 `startup`
-     * 不同，它们不会在 WebUI 里被改。插件版本从自己的 `package.json` 读（`PLUGIN_VERSION`
-     * 在文件末尾由 `createRequire` 取），不写死一个字符串：写死的话改了 `package.json`
-     * 的版本号、图上还是旧的那个，而那种不一致最难被察觉。
-     */
-    const versions = { framework: ctx.app.version, plugin: PLUGIN_VERSION }
+    // 两个版本号，给版权行用；运行期不变，取一次即可。插件版本即内核从 package.json 补来的那个
+    const versions = { framework: ctx.app.version, plugin: ctx.version }
 
     /** 互斥锁：同时只渲染一张图，见文件头 */
     let busy = false
@@ -485,16 +474,5 @@ export function plainSummary(view: StateView): string {
   lines.push(`插件 ${view.system.pluginCount} 个 · 命令 ${view.system.commandCount} 条`)
   return lines.join("\n")
 }
-
-/**
- * 本插件的版本，从自己的 `package.json` 读
- *
- * 用 `createRequire` 而不是 `import ... with { type: "json" }`：后者要求 import 断言，
- * 而本插件是 `NodeNext` 下编译的 ESM，加断言会让 `tsc` 的 target 与 Node 的最低版本
- * 要求一起往上走，为一个版本号不值得。
- */
-export const PLUGIN_VERSION: string = (
-  createRequire(import.meta.url)("../package.json") as { version: string }
-).version
 
 export type { Logger }
