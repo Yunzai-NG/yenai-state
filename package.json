@@ -1,6 +1,6 @@
 {
   "name": "@yunzai-ng/yenai-state",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "机器人状态图：整机资源、磁盘、网络、进程与 Redis，附资源占用曲线",
   "type": "module",
   "private": true,
